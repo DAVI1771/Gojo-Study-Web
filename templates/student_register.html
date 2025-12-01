@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Student Registration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h2>Student Registration</h2>
+    <form id="studentForm">
+        <label>Name:</label>
+        <input type="text" id="name" required><br>
+
+
+        <label>Username:</label>
+        <input type="text" id="username" required><br>
+
+
+        <label>Password:</label>
+        <input type="password" id="password" required><br>
+
+        <label>Grade:</label>
+        <select id="grade" required>
+            <option value="9">9</option>
+            <option value="10">10</option>
+        </select><br>
+
+        <label>Section:</label>
+        <select id="section" required>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+        </select><br>
+
+        <button type="submit">Register</button>
+    </form>
+
+    <script src="{{ url_for('static', filename='js/student_register.js') }}"></script>
+</body>
+</html>

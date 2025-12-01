@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Teacher Registration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h2>Teacher Registration</h2>
+    <form id="teacherForm">
+        <label>Name:</label>
+        <input type="text" id="name" required><br>
+        <label>Username:</label>
+        <input type="text" id="username" required><br>
+
+
+        <label>Password:</label>
+        <input type="password" id="password" required><br>
+
+        <label>Grade:</label>
+        <select id="grade" required>
+            <option value="9">9</option>
+            <option value="10">10</option>
+        </select><br>
+
+        <label>Section:</label>
+        <select id="section" required>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+        </select><br>
+
+        <label>Subject:</label>
+        <select id="subject" required>
+            <option value="English">English</option>
+            <option value="Math">Math</option>
+            <option value="Science">Science</option>
+            <option value="History">History</option>
+            <!-- Add other subjects as needed -->
+        </select><br>
+
+        <button type="submit">Register</button>
+    </form>
+
+    <script src="{{ url_for('static', filename='js/teacher_register.js') }}"></script>
+</body>
+</html>
