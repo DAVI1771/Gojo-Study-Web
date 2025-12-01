@@ -5,7 +5,7 @@ document.getElementById('parentForm').addEventListener('submit', function(e){
         username: document.getElementById('username').value,
         name: document.getElementById('name').value,
         password: document.getElementById('password').value,
-        children: document.getElementById('children').value // comma-separated student IDs
+        children: document.getElementById('children').value.split(',').map(s => s.trim())
     };
 
     fetch('/register/parent', {

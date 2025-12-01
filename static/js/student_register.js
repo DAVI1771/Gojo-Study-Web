@@ -16,7 +16,7 @@ document.getElementById('studentForm').addEventListener('submit', function(e){
     })
     .then(res => res.json())
     .then(res => {
-        alert(res.message); // Shows success or username exists message
+        alert(res.message);
         if(res.success){
             document.getElementById('studentForm').reset();
         }

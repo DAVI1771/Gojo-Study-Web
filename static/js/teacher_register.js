@@ -5,9 +5,7 @@ document.getElementById('teacherForm').addEventListener('submit', function(e){
         username: document.getElementById('username').value,
         name: document.getElementById('name').value,
         password: document.getElementById('password').value,
-        grade: document.getElementById('grade').value,
-        section: document.getElementById('section').value,
-        subject: document.getElementById('subject').value
+        department: document.getElementById('department').value
     };
 
     fetch('/register/teacher', {
