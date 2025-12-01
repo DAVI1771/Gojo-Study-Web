@@ -8,6 +8,7 @@
 <body>
     <h2>Teacher Registration</h2>
     <form id="teacherForm">
+
         <label>Name:</label>
         <input type="text" id="name" required><br>
 
@@ -17,13 +18,31 @@
         <label>Password:</label>
         <input type="password" id="password" required><br>
 
-        <label>Department:</label>
-        <select id="department" required>
-            <option value="Science">Science</option>
-            <option value="Math">Math</option>
+        
+
+        <label>Grade:</label>
+<select id="grade" required>
+    <option value="9">9</option>
+    <option value="10">10</option>
+</select><br>
+
+<label>Section:</label>
+<select id="section" required>
+    <option value="A">A</option>
+    <option value="B">B</option>
+    <option value="C">C</option>
+</select><br>
+
+
+        
+
+        <label>Subject:</label>
+        <select id="subject" required>
             <option value="English">English</option>
+            <option value="Math">Math</option>
+            <option value="Science">Science</option>
             <option value="History">History</option>
-            <!-- Add other departments as needed -->
+            <!-- Add other subjects as needed -->
         </select><br>
 
         <button type="submit">Register</button>

@@ -1,11 +1,14 @@
 document.getElementById('parentForm').addEventListener('submit', function(e){
     e.preventDefault();
 
+    const childrenStr = document.getElementById('children').value;
+    const childrenArray = childrenStr.split(',').map(s => s.trim()); // convert to array
+
     const data = {
         username: document.getElementById('username').value,
         name: document.getElementById('name').value,
         password: document.getElementById('password').value,
-        children: document.getElementById('children').value.split(',').map(s => s.trim())
+        children: childrenArray
     };
 
     fetch('/register/parent', {

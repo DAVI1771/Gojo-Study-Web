@@ -2,11 +2,14 @@ document.getElementById('teacherForm').addEventListener('submit', function(e){
     e.preventDefault();
 
     const data = {
-        username: document.getElementById('username').value,
-        name: document.getElementById('name').value,
-        password: document.getElementById('password').value,
-        department: document.getElementById('department').value
-    };
+    username: document.getElementById('username').value,
+    name: document.getElementById('name').value,
+    password: document.getElementById('password').value,
+    grade: document.getElementById('grade').value,     // must exist
+    section: document.getElementById('section').value, // must exist
+    subject: document.getElementById('subject').value
+};
+
 
     fetch('/register/teacher', {
         method: 'POST',

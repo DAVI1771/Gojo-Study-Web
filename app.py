@@ -14,7 +14,7 @@ firebase_admin.initialize_app(cred, {
 # ===================== HOME PAGE =====================
 @app.route('/')
 def home():
-    return render_template('teacher_register.html')
+    return render_template('parent_register.html')
 
 
 # ===================== STUDENT REGISTRATION =====================
@@ -84,7 +84,7 @@ def register_teacher():
     new_teacher_ref = teachers_ref.push()
     new_teacher_ref.set({
         'userId': new_user_ref.key,
-        'department': data.get('department', ''),
+        
         'grade': data['grade'],
         'section': data['section'],
         'subject': data['subject'],
@@ -108,10 +108,11 @@ def register_parent():
         if user.get('username') == data['username']:
             return jsonify({'success': False, 'message': 'Username already exists!'})
 
-    # Create user in Users
+    # Create user in Users node
     new_user_ref = users_ref.push()
+    user_id = new_user_ref.key
     new_user_ref.set({
-        'userId': new_user_ref.key,
+        'userId': user_id,
         'username': data['username'],
         'name': data['name'],
         'password': data['password'],
@@ -120,14 +121,16 @@ def register_parent():
     })
 
     # Create parent entry
-    children_ids = [x.strip() for x in data['children'].split(',')]
-    new_parent_ref = parents_ref.push()
-    new_parent_ref.set({
-        'userId': new_user_ref.key,
+    children_ids = data['children']  # already an array from JS
+    parent_ref = parents_ref.child(user_id)  # same key as userId
+    parent_ref.set({
+        'name': data['name'],
         'children': {child: True for child in children_ids}
     })
 
     return jsonify({'success': True, 'message': 'Parent registered successfully!'})
+
+
 
 
 # ===================== RUN APP =====================
