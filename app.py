@@ -309,6 +309,71 @@ def get_teacher_students(teacher_id):
     return jsonify({'courses': course_students})
 
 
+# ===================== GET STUDENTS OF A COURSE =====================
+@app.route('/api/course/<course_id>/students', methods=['GET'])
+def get_course_students(course_id):
+    courses_ref = db.reference('Courses')
+    students_ref = db.reference('Students')
+
+    course = courses_ref.child(course_id).get()
+    if not course:
+        return jsonify({'students': [], 'course': None})
+
+    grade = course.get('grade')
+    section = course.get('section')
+
+    all_students = students_ref.get() or {}
+    course_students = []
+
+    for student in all_students.values():
+        if student.get('grade') == grade and student.get('section') == section:
+            user_ref = db.reference('Users').child(student.get('userId')).get()
+            if user_ref:
+                course_students.append({
+                    'name': user_ref.get('name'),
+                    'username': user_ref.get('username')
+                })
+
+    return jsonify({
+        'students': course_students,
+        'course': {
+            'subject': course.get('subject'),
+            'grade': grade,
+            'section': section
+        }
+    })
+
+# ===================== UPDATE STUDENT MARKS =====================
+@app.route('/api/course/<course_id>/update-marks', methods=['POST'])
+def update_course_marks(course_id):
+    data = request.json
+    updates = data.get('updates', [])
+
+    students_ref = db.reference('Students')
+    all_students = students_ref.get() or {}
+
+    for update in updates:
+        username = update.get('username')
+        marks = update.get('marks', {})
+
+        # Find the student by username
+        for student_id, student in all_students.items():
+            user_ref = db.reference(f"Users/{student['userId']}")
+            user_data = user_ref.get()
+            if user_data and user_data.get('username') == username:
+                # Save marks for this course
+                student_marks_ref = students_ref.child(student_id).child('marks')
+                student_marks_ref.child(course_id).set({
+                    'mark20': marks.get('mark20', 0),
+                    'mark30': marks.get('mark30', 0),
+                    'mark50': marks.get('mark50', 0),
+                    'mark100': marks.get('mark100', 0)
+                })
+                break
+
+    return jsonify({'success': True, 'message': 'Marks updated successfully!'})
+
+
 
 
 
