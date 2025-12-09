@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, db, storage
@@ -7,8 +7,14 @@ from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime
 import sys
+from flask import Flask, request, jsonify
+from firebase_admin import db
+
+
 
 app = Flask(__name__)
+CORS(app, origins=["http://localhost:5173"], supports_credentials=True)  # ✅ Fix CORS
+
 CORS(app)
 
 # ---------------- FIREBASE ---------------- #
@@ -38,98 +44,99 @@ def upload_file_to_firebase(file, folder=""):
         blob.upload_from_file(file, content_type=file.content_type)
         blob.make_public()
         return blob.public_url
-    except:
+    except Exception as e:
+        print("Upload Error:", e)
         return ""
-
-# ---------------- ROUTES ---------------- #
-@app.route("/")
-def root():
-    return render_template("school_admin_register.html")
-
-@app.route("/login")
-def login():
-    return render_template("school_admin_login.html")
-
-@app.route("/dashboard")
-def dashboard():
-    return render_template("school_admin_dashboard.html")
 
 # ---------------- REGISTER ADMIN ---------------- #
 @app.route("/api/register", methods=["POST"])
 def register_admin():
-    data = request.form
-    username = data.get("username")
-    name = data.get("name")
-    password = data.get("password")
-    profile = request.files.get("profile")
+    try:
+        data = request.form
+        username = data.get("username")
+        name = data.get("name")
+        password = data.get("password")
+        profile = request.files.get("profile")
 
-    all_users = users_ref.get() or {}
-    for u in all_users.values():
-        if u.get("username") == username:
-            return jsonify({"success": False, "message": "Username already taken!"})
+        # Check if username exists
+        all_users = users_ref.get() or {}
+        for u in all_users.values():
+            if u.get("username") == username:
+                return jsonify({"success": False, "message": "Username already taken!"})
 
-    profile_url = ""
-    if profile:
-        profile_url = upload_file_to_firebase(profile, "profiles")
+        profile_url = upload_file_to_firebase(profile, folder="profiles") if profile else ""
 
-    new_user = users_ref.push()
-    new_user.set({
-        "userId": new_user.key,
-        "name": name,
-        "username": username,
-        "password": password,
-        "profileImage": profile_url,
-        "role": "school_admin",
-        "isActive": True
-    })
+        # Create new user
+        new_user = users_ref.push()
+        new_user.set({
+            "userId": new_user.key,
+            "name": name,
+            "username": username,
+            "password": password,
+            "profileImage": profile_url,
+            "role": "school_admin",
+            "isActive": True
+        })
 
-    new_admin = school_admin_ref.push()
-    new_admin.set({
-        "adminId": new_admin.key,
-        "userId": new_user.key,
-        "username": username,
-        "password": password,
-        "name": name,
-    })
+        # Create admin record
+        new_admin = school_admin_ref.push()
+        new_admin.set({
+            "adminId": new_admin.key,
+            "userId": new_user.key,
+            "username": username,
+            "password": password,
+            "name": name,
+        })
 
-    return jsonify({"success": True, "message": "Registration successful!"})
+        return jsonify({"success": True, "message": "Registration successful!"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 # ---------------- LOGIN ADMIN ---------------- #
 @app.route("/api/login", methods=["POST"])
 def login_admin():
-    data = request.get_json(force=True)
-    username = data.get("username")
-    password = data.get("password")
+    try:
+        data = request.get_json(force=True)
+        username = data.get("username")
+        password = data.get("password")
 
-    users = users_ref.get() or {}
-    matched_user = None
-    for user_id, user in users.items():
-        if user.get("username") == username and user.get("password") == password:
-            matched_user = user
-            break
+        users = users_ref.get() or {}
+        matched_user = None
+        for user in users.values():
+            if user.get("username") == username and user.get("password") == password:
+                matched_user = user
+                break
 
-    if not matched_user:
-        return jsonify({"success": False, "message": "Invalid username or password"})
+        if not matched_user:
+            return jsonify({"success": False, "message": "Invalid username or password"})
 
-    admins = school_admin_ref.get() or {}
-    for admin_id, admin in admins.items():
-        if admin.get("userId") == matched_user.get("userId"):
-            return jsonify({
-                "success": True,
-                "message": "Login success",
-                "adminId": admin_id
-            })
+        admins = school_admin_ref.get() or {}
+        for admin in admins.values():
+            if admin.get("userId") == matched_user.get("userId"):
+                return jsonify({
+                    "success": True,
+                    "message": "Login success",
+                    "adminId": admin.get("adminId"),
+                    "name": matched_user.get("name"),
+                    "username": matched_user.get("username"),
+                    "profileImage": matched_user.get("profileImage", "")
+                })
 
-    return jsonify({"success": False, "message": "Not registered as admin"})
+        return jsonify({"success": False, "message": "Not registered as admin"})
+    except Exception as e:
+        print("Login Error:", e)
+        return jsonify({"success": False, "message": str(e)}), 500
 
+
+# ---------------- CREATE POST ---------------- #
 # ---------------- CREATE POST ---------------- #
 @app.route("/api/create_post", methods=["POST"])
 def create_post():
     try:
-        # Get data from form
-        text = request.form.get("text", "")
-        adminId = request.form.get("adminId")
-        media_file = request.files.get("post_media")  # <-- Make sure JS uses this name
+        data = request.form
+        text = data.get("text", "")
+        adminId = data.get("adminId")
+        media_file = request.files.get("post_media")
 
         if not adminId:
             return jsonify({"success": False, "message": "Admin not logged in"})
@@ -154,152 +161,106 @@ def create_post():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
-@app.route("/api/get_admin_name")
-def get_admin_name():
-    adminId = request.args.get("adminId")
-    if not adminId:
-        return jsonify({"success": False})
-    admin = school_admin_ref.child(adminId).get()
-    if not admin:
-        return jsonify({"success": False})
-    return jsonify({"success": True, "name": admin.get("name", "Admin")})
-
-
-# GET posts by admin (for profile page)
-@app.route("/api/posts", methods=["GET"])
+# ---------------- GET ALL POSTS ---------------- #
+@app.route("/api/get_posts", methods=["GET"])
 def get_posts():
     all_posts = posts_ref.get() or {}
-    posts_list = []
+    post_list = []
 
-    for post_id, post in all_posts.items():
-        adminId = post.get("adminId")
-        admin_data = school_admin_ref.child(adminId).get()
-        user_data = users_ref.child(admin_data.get("userId")).get() if admin_data else {}
+    for key, post in all_posts.items():
+        admin_data = school_admin_ref.child(post.get("adminId")).get()
+        user_data = users_ref.child(admin_data["userId"]).get() if admin_data else {}
 
-        posts_list.append({
-            **post,
-            "postId": post_id,
-            "adminName": user_data.get("name", "Admin"),
-            "adminProfile": user_data.get("profileImage", "")
+        post_list.append({
+            "postId": key,
+            "message": post.get("message"),
+            "postUrl": post.get("postUrl"),
+            "adminId": post.get("adminId"),
+            "adminName": user_data.get("name") if user_data else "Admin",
+            "adminProfile": user_data.get("profileImage") if user_data else "/default-profile.png",
+            "time": post.get("time")
         })
 
-    posts_list.sort(key=lambda x: x.get("time", ""), reverse=True)
-    return jsonify(posts_list)
+    # Sort posts by newest first
+    post_list.reverse()  # latest post first
+
+    return jsonify(post_list)
 
 
-
-@app.route("/api/admin_posts")
-def admin_posts():
-    adminId = request.args.get("adminId")
-    all_posts = posts_ref.get() or {}
-    posts_list = []
-
-    for post in all_posts.values():
-        if post["adminId"] == adminId:
-            posts_list.append(post)
-
-    posts_list.sort(key=lambda x: x.get("time", ""), reverse=True)
-    return jsonify(posts_list)
-
-
-
-# ---------------- ADMIN PROFILE PAGE ---------------- #
-@app.route("/profile/<adminId>")
-def admin_profile(adminId):
+# ---------------- GET ADMIN PROFILE ---------------- #
+@app.route("/api/admin/<adminId>", methods=["GET"])
+def fetch_admin_profile(adminId):  # renamed function
     admin_data = school_admin_ref.child(adminId).get()
     if not admin_data:
-        return "Admin not found", 404
+        return jsonify({"success": False, "message": "Admin not found"}), 404
+    user_data = users_ref.child(admin_data["userId"]).get() or {}
+    profile = {
+        "adminId": adminId,
+        "name": user_data.get("name"),
+        "username": user_data.get("username"),
+        "profileImage": user_data.get("profileImage", "/default-profile.png")
+    }
+    return jsonify({"success": True, "admin": profile})
 
-    userId = admin_data.get("userId")
-    user_info = users_ref.child(userId).get() or {}
-    fullName = user_info.get("name", "Admin")
-    profileUrl = user_info.get("profileImage", "")
-
-    # Get admin posts
+# ---------------- GET MY POSTS ---------------- #
+@app.route("/api/get_my_posts/<adminId>", methods=["GET"])
+def get_my_posts(adminId):
     all_posts = posts_ref.get() or {}
-    admin_posts = [
-        {**p, "postId": key}
-        for key, p in all_posts.items()
-        if p.get("adminId") == adminId
-    ]
-    admin_posts.sort(key=lambda x: x.get("time",""), reverse=True)
+    my_posts = []
 
-    return render_template("school_admin_profile.html",
-                           adminId=adminId,
-                           fullName=fullName,
-                           profileUrl=profileUrl,
-                           posts=admin_posts)
-
-
-@app.route('/profile/<adminId>')
-def profile(adminId):
-    # Get admin info
-    admin_data = school_admin_ref.child(adminId).get()
-    if not admin_data:
-        return "Admin not found", 404
-
-    user_data = users_ref.child(admin_data["userId"]).get()
-    if not user_data:
-        return "User not found", 404
-
-    # Get all posts of this admin
-    all_posts = posts_ref.get() or {}
-    admin_posts = []
     for key, post in all_posts.items():
         if post.get("adminId") == adminId:
-            post["postId"] = key
-            post["adminName"] = admin_data.get("name")  # show admin name without storing in DB
-            admin_posts.append(post)
+            my_posts.append({
+                "postId": key,
+                "message": post.get("message"),
+                "postUrl": post.get("postUrl"),
+                "time": post.get("time"),
+                "edited": post.get("edited", False)
+            })
 
-    # Render profile template
-    return render_template(
-        "school_admin_profile.html",
-        adminId=adminId,
-        fullName=user_data.get("name"),
-        profileUrl=user_data.get("profileImage"),
-        posts=admin_posts
-    )
-@app.route('/edit_post/<postId>', methods=['POST'])
+    my_posts.reverse()  # latest first
+    return jsonify(my_posts)
+
+
+# ---------------- EDIT POST ---------------- #
+@app.route("/api/edit_post/<postId>", methods=["POST"])
 def edit_post(postId):
-    data = request.get_json()
+    data = request.get_json(force=True)
     adminId = data.get("adminId")
     new_text = data.get("postText", "")
 
     post_ref = posts_ref.child(postId)
     post_data = post_ref.get()
-
     if not post_data:
-        return jsonify({"error": "Post not found"}), 404
-
+        return jsonify({"success": False, "message": "Post not found"}), 404
     if post_data["adminId"] != adminId:
-        return jsonify({"error": "Unauthorized"}), 403
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     post_ref.update({
         "message": new_text,
         "updatedAt": datetime.now().strftime("%I:%M %p, %b %d %Y"),
         "edited": True
     })
-
     return jsonify({"success": True, "message": "Post updated"})
 
-
-
-@app.route('/delete_post/<postId>', methods=['DELETE'])
+# ---------------- DELETE POST ---------------- #
+@app.route("/api/delete_post/<postId>", methods=["DELETE"])
 def delete_post(postId):
-    data = request.get_json()
+    data = request.get_json(force=True)
     adminId = data.get("adminId")
-
     post_ref = posts_ref.child(postId)
     post_data = post_ref.get()
-
     if not post_data:
-        return jsonify({"error": "Post not found"}), 404
-
+        return jsonify({"success": False, "message": "Post not found"}), 404
     if post_data["adminId"] != adminId:
-        return jsonify({"error": "Unauthorized"}), 403
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     post_ref.delete()
     return jsonify({"success": True, "message": "Post deleted"})
+
+# Like or unlike a post
+# ---------------- LIKE POST ---------------- #
+
 
 # ---------------- LIKE POST ---------------- #
 @app.route("/api/like_post", methods=["POST"])
@@ -327,7 +288,12 @@ def like_post():
         return jsonify({"success": True, "likeCount": len(likes), "liked": not current_like})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
+    
 
-# ---------------- MAIN ---------------- #
+
+
+    
+
+# ---------------- RUN ---------------- #
 if __name__ == "__main__":
     app.run(debug=True)
