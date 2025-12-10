@@ -148,8 +148,8 @@ function TeachersPage() {
                 <div
                   key={t.teacherId}
                   style={{
-                    width: "600px",
-                    Height: "60px",
+                    width: "500px",
+                    Height: "50px",
                     border: "1px solid #ddd",
                     borderRadius: "12px",
                     padding: "20px",
