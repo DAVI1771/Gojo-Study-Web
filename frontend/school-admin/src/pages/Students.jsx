@@ -109,11 +109,11 @@ function StudentsPage() {
         </div>
 
         {/* MAIN CONTENT */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "350px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
           <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Students</h2>
 
           {/* Grade Filter */}
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px", gap: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px" }}>
             {["All", "9", "10", "11", "12"].map(g => (
               <button
                 key={g}
@@ -158,13 +158,13 @@ function StudentsPage() {
           {filteredStudents.length === 0 ? (
             <p style={{ textAlign: "center", color: "#555" }}>No students found for this selection.</p>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "15px" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
              {filteredStudents.map(s => (
   <div
     key={s.studentId}
     onClick={() => setSelectedStudent(s)}
     style={{
-      width: "600px",
+      width: "500px",
       height: "70px",
       borderRadius: "12px",
       padding: "15px",
@@ -209,13 +209,13 @@ function StudentsPage() {
 <div
   className="student-info-sidebar"
   style={{
-    width: "20%",
+    width: "30%",
     padding: "25px",
-    borderLeft: "1px solid #ddd",
-    background: "#f1f4f8",
+    
+    background: "#ffffffff",
     display: selectedStudent ? "block" : "none",
     boxShadow: "0 0 15px rgba(0,0,0,0.05)",
-    borderRadius: "12px 0 0 12px",
+    
 
     // FIXED SIDEBAR — WILL NOT SCROLL
     position: "fixed",
@@ -228,12 +228,23 @@ function StudentsPage() {
 >
   {selectedStudent && (
     <div style={{ textAlign: "center" }}>
+     <div
+  style={{
+    background: "#becff7ff",
+    padding: "25px 10px",
+    height: "200px",  
+    width: "calc(100% + 50px)",   // 🔥 cancel sidebar padding
+     margin: "-25px -25px 20px",  // 🔥 negative margin to touch edges
+    textAlign: "center",
+    boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
+  }}
+>
       {/* Avatar */}
       <div
         style={{
-          width: "120px",
-          height: "120px",
-          margin: "0 auto 20px",
+          width: "100px",
+          height: "100px",
+          margin: "-20px auto 15px",
           borderRadius: "50%",
           overflow: "hidden",
           border: "4px solid #4b6cb7",
@@ -248,11 +259,22 @@ function StudentsPage() {
       </div>
 
       {/* Name */}
-      <h2 style={{ margin: "10px 0", fontSize: "22px", color: "#333" }}>
+      <h2 style={{ margin: "0", fontSize: "22px",marginTop:"-10px", color: "#333" }}>
         {selectedStudent.name}
       </h2>
+      
 
-      {/* Grade & Section */}
+        <h2 style={{ margin: "0",
+                fontSize: "16px",
+                marginTop:"0",
+                color: "#585656ff", }}>
+    {selectedStudent.email ? selectedStudent.email : "default.student@example.com"}
+  </h2>
+
+     
+      </div>
+
+       {/* Grade & Section */}
       <p style={{ color: "#555", fontSize: "16px", margin: "5px 0" }}>
         <strong>Grade:</strong> {selectedStudent.grade}
       </p>
@@ -287,12 +309,14 @@ function StudentsPage() {
           marginTop: "20px",
           display: "flex",
           flexDirection: "column",
-          gap: "10px"
+          gap: "10px",
+           alignItems: "flex-end"
         }}
       >
        <button
   style={{
     padding: "10px",
+     width: "120px", 
     borderRadius: "8px",
     border: "none",
     background: "#4b6cb7",
@@ -300,7 +324,7 @@ function StudentsPage() {
     cursor: "pointer",
     fontWeight: "bold",
     transition: "0.3s",
-    marginTop: "400px"
+    marginTop: "140px"
   }}
   onClick={() => setStudentChatOpen(true)}
 >
@@ -326,7 +350,8 @@ function StudentsPage() {
       boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
       padding: "15px",
       zIndex: 999,
-      right: "25px",
+      right: "22px",
+      bottom: "6px",
       animation: "fadeIn 0.3s ease"
     }}
   >

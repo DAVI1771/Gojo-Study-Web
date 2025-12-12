@@ -5,6 +5,17 @@ from firebase_admin import credentials, db
 from flask_cors import CORS
 from flask import Flask
 from flask_cors import CORS
+from firebase_admin import storage
+from firebase_admin import credentials, db, storage
+import os
+from werkzeug.utils import secure_filename
+import uuid
+from datetime import datetime
+import sys
+from firebase_admin import db
+
+
+
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -13,11 +24,20 @@ CORS(app)
 # ✅ Fix CORS: allow all origins, methods, headers
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
+
+# ---------------- FIREBASE ---------------- #
+firebase_json = "ethiostore-17d9f-firebase-adminsdk-5e87k-ff766d2648.json"
+if not os.path.exists(firebase_json):
+    print("Firebase JSON missing")
+    sys.exit()
+
 # Initialize Firebase Admin
-cred = credentials.Certificate('ethiostore-17d9f-firebase-adminsdk-5e87k-ff766d2648.json')
+cred = credentials.Certificate(firebase_json)
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://ethiostore-17d9f-default-rtdb.firebaseio.com/'
+    "databaseURL": "https://ethiostore-17d9f-default-rtdb.firebaseio.com/",
+    "storageBucket": "ethiostore-17d9f.appspot.com"
 })
+bucket = storage.bucket()
 
 
 # ===================== HOME PAGE =====================
@@ -70,11 +90,14 @@ def register_student():
 
 
 
-
 # ===================== TEACHER REGISTRATION =====================
 @app.route('/register/teacher', methods=['POST'])
 def register_teacher():
-    data = request.json
+    name = request.form.get('name')
+    username = request.form.get('username')
+    password = request.form.get('password')
+    courses = json.loads(request.form.get('courses', '[]'))
+    profile_file = request.files.get('profile')
 
     users_ref = db.reference('Users')
     teachers_ref = db.reference('Teachers')
@@ -84,56 +107,45 @@ def register_teacher():
     # Check if username exists
     all_users = users_ref.get() or {}
     for user in all_users.values():
-        if user.get('username') == data['username']:
+        if user.get('username') == username:
             return jsonify({'success': False, 'message': 'Username already exists!'})
 
-    # Check for duplicate courses in the same submission
-    seen_courses = set()
-    for course in data.get('courses', []):
-        key = f"{course['subject'].lower()}_{course['grade']}{course['section'].upper()}"
-        if key in seen_courses:
-            return jsonify({'success': False, 'message': f'Duplicate course in submission: {course["subject"]} grade {course["grade"]} section {course["section"]}'})
-        seen_courses.add(key)
+    # Upload profile image
+    profile_url = "/default-profile.png"
+    if profile_file:
+        filename = f"teachers/{username}_{profile_file.filename}"
+        blob = bucket.blob(filename)
+        blob.upload_from_file(profile_file, content_type=profile_file.content_type)
+        blob.make_public()
+        profile_url = blob.public_url
 
-    # Check if course already has a teacher in database
-    all_assignments = assignments_ref.get() or {}
-    for course in data.get('courses', []):
-        grade = course['grade']
-        section = course['section']
-        subject = course['subject']
-        course_id = f"course_{subject.lower()}_{grade}{section.upper()}"
-
-        # If course exists and already assigned
-        for assignment in all_assignments.values():
-            if assignment.get('courseId') == course_id:
-                return jsonify({'success': False, 'message': f'{subject} grade {grade} section {section} already has a teacher!'})
-
-    # Create user
+    # Create user and store profileImage
     new_user_ref = users_ref.push()
-    new_user_ref.set({
+    user_data = {
         'userId': new_user_ref.key,
-        'username': data['username'],
-        'name': data['name'],
-        'password': data['password'],
+        'username': username,
+        'name': name,
+        'password': password,
         'role': 'teacher',
-        'isActive': True
-    })
+        'isActive': True,
+        'profileImage': profile_url  # store profile URL
+    }
+    new_user_ref.set(user_data)
 
     # Create teacher entry
     new_teacher_ref = teachers_ref.push()
-    new_teacher_ref.set({'userId': new_user_ref.key, 'status': 'active'
-                         
-                         
-                         })
+    new_teacher_ref.set({
+        'userId': new_user_ref.key,
+        'status': 'active'
+    })
 
-    # Process all courses
-    for course in data.get('courses', []):
+    # Assign courses
+    for course in courses:
         grade = course['grade']
         section = course['section']
         subject = course['subject']
         course_id = f"course_{subject.lower()}_{grade}{section.upper()}"
 
-        # Create course if not exists
         if not courses_ref.child(course_id).get():
             courses_ref.child(course_id).set({
                 'name': subject,
@@ -142,53 +154,20 @@ def register_teacher():
                 'section': section
             })
 
-        # Assign teacher
-        new_assignment_ref = assignments_ref.push()
-        new_assignment_ref.set({
+        assignment_ref = assignments_ref.push()
+        assignment_ref.set({
             'teacherId': new_teacher_ref.key,
             'courseId': course_id
         })
 
-    return jsonify({'success': True, 'message': 'Teacher registered successfully!'})
-
-
-
-# ===================== PARENT REGISTRATION =====================
-@app.route('/register/parent', methods=['POST'])
-def register_parent():
-    data = request.json
-
-    users_ref = db.reference('Users')
-    parents_ref = db.reference('Parents')
-
-    # Check if username exists
-    all_users = users_ref.get() or {}
-    for user in all_users.values():
-        if user.get('username') == data['username']:
-            return jsonify({'success': False, 'message': 'Username already exists!'})
-
-    # Create user
-    new_user_ref = users_ref.push()
-    new_user_ref.set({
-        'userId': new_user_ref.key,
-        'username': data['username'],
-        'name': data['name'],
-        'password': data['password'],
-        'role': 'parent',
-        'isActive': True
+    return jsonify({
+        'success': True,
+        'message': 'Teacher registered successfully!',
+        'teacherId': new_user_ref.key,
+        'profileImage': profile_url  # return URL to frontend
     })
 
-    # Ensure children list is a list
-    children_ids = data['children'] if isinstance(data['children'], list) else [x.strip() for x in data['children'].split(',')]
 
-    # Create parent entry
-    new_parent_ref = parents_ref.push()
-    new_parent_ref.set({
-        'userId': new_user_ref.key,
-        'children': {child: True for child in children_ids}
-    })
-
-    return jsonify({'success': True, 'message': 'Parent registered successfully!'})
 
 
 
@@ -435,23 +414,69 @@ def update_course_marks(course_id):
 
 @app.route("/api/get_posts", methods=["GET"])
 def get_posts():
-    # Replace with actual logic to fetch posts
-    posts = [
-        {
-            "postId": "1",
-            "teacherId": "t001",
-            "adminName": "Admin",
-            "adminProfile": "/default-profile.png",
-            "message": "Hello world",
-            "timestamp": "2025-12-10T11:00:00",
-            "likeCount": 0,
-            "likes": {}
-        }
-    ]
-    return jsonify(posts)
+    try:
+        posts_ref = db.reference("Posts")
+        admins_ref = db.reference("School_Admins")
+
+        all_posts = posts_ref.get() or {}
+        result = []
+
+        for post_id, post in all_posts.items():
+            admin_id = post.get("adminId")
+            admin = admins_ref.child(admin_id).get() or {}
+
+            admin_name = admin.get("name", "Admin")
+            admin_profile = admin.get("profileImage", "/default-profile.png")
+
+            result.append({
+                "postId": post_id,
+                "adminId": admin_id,
+                "adminName": admin_name,
+                "adminProfile": admin_profile,
+                "message": post.get("message", ""),
+                "postUrl": post.get("postUrl"),
+                "timestamp": post.get("time", ""),  # use 'time' from your DB
+                "likeCount": post.get("likeCount", 0),
+                "likes": post.get("likes", {})
+            })
+
+        # Sort posts by timestamp descending
+        result.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        return jsonify(result)
+
+    except Exception as e:
+        print("Get posts error:", e)
+        return jsonify([]), 500
 
 
 
+@app.route("/api/teacher/<teacher_id>", methods=["GET"])
+def get_teacher(teacher_id):
+    try:
+        users_ref = db.reference("Users")
+        teacher_user = users_ref.child(teacher_id).get()
+        if not teacher_user or teacher_user.get("role") != "teacher":
+            return jsonify({"success": False, "message": "Teacher not found"})
+
+        return jsonify({
+            "success": True,
+            "teacher": {
+                "teacherId": teacher_id,
+                "name": teacher_user.get("name"),
+                "username": teacher_user.get("username"),
+                "profileImage": teacher_user.get("profileImage", "/default-profile.png")
+            }
+        })
+    except Exception as e:
+        print("Get teacher error:", e)
+        return jsonify({"success": False, "message": "Server error"}), 500
+    
+
+
+
+
+    
 
 
 # ===================== RUN APP =====================

@@ -110,7 +110,7 @@ function TeachersPage() {
         </div>
 
         {/* MAIN CONTENT */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "350px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
           <h2 style={{ marginBottom: "10px", textAlign: "center" }}>Teachers</h2>
 
           {/* Grade Filter */}
@@ -146,9 +146,10 @@ function TeachersPage() {
                   onClick={() => setSelectedTeacher(t)}
                   style={{
                     width: "500px",
-                    Height: "50px",
+                    Height: "70px",
                     border: "1px solid #ddd",
                     borderRadius: "12px",
+                    padding: "15px",
                     background: selectedTeacher?.teacherId === t.teacherId ? "#e0e7ff" : "#fff",
                     border: selectedTeacher?.teacherId === t.teacherId ? "2px solid #4b6cb7" : "1px solid #ddd",
                     boxShadow: selectedTeacher?.teacherId === t.teacherId ? "0 6px 15px rgba(75,108,183,0.3)" : "0 4px 10px rgba(0,0,0,0.1)",
@@ -187,13 +188,13 @@ function TeachersPage() {
 <div
   className="teacher-info-sidebar"
   style={{
-    width: "20%",
+    width: "30%",
     padding: "25px",
-    borderLeft: "1px solid #ddd",
-    background: "#f1f4f8",
+    
+    background: "#ffffffff",
     display: selectedTeacher ? "block" : "none",
     boxShadow: "0 0 15px rgba(0,0,0,0.05)",
-    borderRadius: "12px 0 0 12px",
+ 
 
     // FIXED SIDEBAR – DOES NOT SCROLL
     position: "fixed",
@@ -206,30 +207,56 @@ function TeachersPage() {
 >
   {selectedTeacher && (
     <div style={{ textAlign: "center" }}>
+      
 
-      {/* Avatar */}
-      <div
-        style={{
-          width: "120px",
-          height: "120px",
-          margin: "0 auto 20px",
-          borderRadius: "50%",
-          overflow: "hidden",
-          border: "4px solid #4b6cb7",
-          boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
-        }}
-      >
-        <img
-          src={selectedTeacher.profileImage}
-          alt={selectedTeacher.name}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </div>
+    {/* Red Box */}
+<div
+  style={{
+    background: "#becff7ff",
+    padding: "25px 10px",
+    height: "200px",  
+    width: "calc(100% + 50px)",   // 🔥 cancel sidebar padding
+     margin: "-25px -25px 20px",  // 🔥 negative margin to touch edges
+    textAlign: "center",
+    boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
+  }}
+>
+  {/* Avatar */}
+  <div
+    style={{
+      width: "100px",
+      height: "100px",
+      margin: "-20px auto 15px",
+      borderRadius: "50%",
+      overflow: "hidden",
+      border: "4px solid #4b6cb7",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
+    }}
+  >
+    <img
+      src={selectedTeacher.profileImage}
+      alt={selectedTeacher.name}
+      style={{ width: "100%", 
+               height: "100%", 
+               objectFit: "cover" }}
+    />
+  </div>
 
-      {/* Name */}
-      <h2 style={{ margin: "10px 0", fontSize: "22px", color: "#333" }}>
-        {selectedTeacher.name}
-      </h2>
+  {/* Name */}
+  <h2 style={{ margin: "0",
+                fontSize: "22px",
+                marginTop:"-10px",
+                color: "#000000ff", }}>
+    {selectedTeacher.name}
+  </h2>
+  <h2 style={{ margin: "0",
+                fontSize: "16px",
+                marginTop:"0",
+                color: "#585656ff", }}>
+    {selectedTeacher.email ? selectedTeacher.email : "default.teacher@example.com"}
+  </h2>
+</div>
+
 
       {/* Info Card */}
       <div
@@ -264,12 +291,14 @@ function TeachersPage() {
           marginTop: "20px",
           display: "flex",
           flexDirection: "column",
-          gap: "10px"
+          gap: "10px",
+          alignItems: "flex-end"
         }}
       >
         <button
   style={{
     padding: "10px",
+    width: "120px", 
     borderRadius: "8px",
     border: "none",
     background: "#4b6cb7",
@@ -277,7 +306,7 @@ function TeachersPage() {
     cursor: "pointer",
     fontWeight: "bold",
     transition: "0.3s",
-    marginTop: "450px"
+    marginTop: "185px"
   }}
   onClick={() => setTeacherChatOpen(true)}
 >
@@ -289,6 +318,19 @@ function TeachersPage() {
     </div>
   )}
 </div>
+
+
+
+
+
+
+
+
+
+
+
+
+
 {/* TEACHER CHAT POPUP */}
 {/* TEACHER CHAT POPUP */}
 {teacherChatOpen && selectedTeacher && (
@@ -302,7 +344,8 @@ function TeachersPage() {
       boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
       padding: "15px",
       zIndex: 999,
-      marginLeft: "1550px",
+      right: "22px",
+      bottom: "6px",
       animation: "fadeIn 0.3s ease"
     }}
   >
@@ -352,7 +395,7 @@ function TeachersPage() {
             cursor: "pointer"
           }}
         >
-          ×
+          
         </button>
       </div>
     </div>
