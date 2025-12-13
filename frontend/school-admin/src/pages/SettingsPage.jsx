@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
 import axios from "axios";
 import useDarkMode from "../hooks/useDarkMode";
 
@@ -76,14 +76,41 @@ function SettingsPage() {
 
   return (
     <div className="dashboard-page">
-      {/* NAVBAR */}
-      <nav className="top-navbar" style={{ background: darkMode ? "#1b1b1b" : "#fff" }}>
-        <h2>Gojo Dashboard</h2>
-        <div className="nav-right">
-          <img src={admin.profileImage || "/default-profile.png"} alt="admin" />
-          <span>{admin.name}</span>
-        </div>
-      </nav>
+     
+     {/* ---------------- TOP NAVIGATION BAR ---------------- */}
+     <nav className="top-navbar">
+       <h2>Gojo Dashboard</h2>
+     
+       {/* Search Bar */}
+       <div className="nav-search">
+         <FaSearch className="search-icon" />
+         <input type="text" placeholder="Search Teacher and Student..." />
+       </div>
+     
+       <div className="nav-right">
+         {/* Notification */}
+         <div className="icon-circle">
+           <FaBell />
+         </div>
+     
+         {/* Settings */}
+         <div className="icon-circle">
+           <FaCog />
+         </div>
+     
+         {/* Profile */}
+         <img
+           src={admin.profileImage || "/default-profile.png"}
+           alt="admin"
+           className="profile-img"
+         />
+         <span>{admin.name}</span>
+       </div>
+     </nav>
+     
+     
+     
+     
 
       <div className="google-dashboard" style={{ background: darkMode ? "#2c2c2c" : "#f1f1f1" }}>
         {/* SIDEBAR */}

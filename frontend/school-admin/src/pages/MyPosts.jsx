@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
 import { AiFillPicture } from "react-icons/ai";
 import "../styles/global.css";
 
@@ -122,18 +122,40 @@ function MyPosts() {
 
   return (
     <div className="dashboard-page">
-      {/* ---------------- TOP NAVIGATION BAR ---------------- */}
-      <nav className="top-navbar">
-        <h2>Gojo Dashboard</h2>
+  
+  {/* ---------------- TOP NAVIGATION BAR ---------------- */}
+  <nav className="top-navbar">
+    <h2>Gojo Dashboard</h2>
+  
+    {/* Search Bar */}
+    <div className="nav-search">
+      <FaSearch className="search-icon" />
+      <input type="text" placeholder="Search Teacher and Student..." />
+    </div>
+  
+    <div className="nav-right">
+      {/* Notification */}
+      <div className="icon-circle">
+        <FaBell />
+      </div>
+  
+      {/* Settings */}
+      <div className="icon-circle">
+        <FaCog />
+      </div>
+  
+      {/* Profile */}
+      <img
+        src={admin.profileImage || "/default-profile.png"}
+        alt="admin"
+        className="profile-img"
+      />
+      <span>{admin.name}</span>
+    </div>
+  </nav>
+  
+  
 
-        <div className="nav-right">
-          <img
-            src={admin.profileImage || "/default-profile.png"}
-            alt="admin"
-          />
-          <span>{admin.name}</span>
-        </div>
-      </nav>
 
       <div className="google-dashboard">
  {/* LEFT SIDEBAR — 25% */}

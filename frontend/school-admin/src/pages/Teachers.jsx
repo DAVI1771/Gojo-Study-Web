@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
@@ -66,14 +66,41 @@ function TeachersPage() {
 
   return (
     <div className="dashboard-page">
-      {/* NAVBAR */}
-      <nav className="top-navbar">
-        <h2>Gojo Dashboard</h2>
-        <div className="nav-right">
-          <img src={admin.profileImage || "/default-profile.png"} alt="admin" />
-          <span>{admin.name}</span>
+    
+    {/* ---------------- TOP NAVIGATION BAR ---------------- */}
+    <nav className="top-navbar">
+      <h2>Gojo Dashboard</h2>
+    
+      {/* Search Bar */}
+      <div className="nav-search">
+        <FaSearch className="search-icon" />
+        <input type="text" placeholder="Search Teacher and Student..." />
+      </div>
+    
+      <div className="nav-right">
+        {/* Notification */}
+        <div className="icon-circle">
+          <FaBell />
         </div>
-      </nav>
+    
+        {/* Settings */}
+        <div className="icon-circle">
+          <FaCog />
+        </div>
+    
+        {/* Profile */}
+        <img
+          src={admin.profileImage || "/default-profile.png"}
+          alt="admin"
+          className="profile-img"
+        />
+        <span>{admin.name}</span>
+      </div>
+    </nav>
+    
+    
+    
+    
 
       <div className="google-dashboard" style={{ display: "flex" }}>
         {/* SIDEBAR */}
