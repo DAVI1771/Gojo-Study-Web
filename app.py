@@ -43,7 +43,7 @@ bucket = storage.bucket()
 # ===================== HOME PAGE =====================
 @app.route('/')
 def home():
-    return render_template('teacher_login.html')
+    return render_template('parent_register.html')
 
 
 # ===================== STUDENT REGISTRATION =====================
@@ -471,6 +471,58 @@ def get_teacher(teacher_id):
     except Exception as e:
         print("Get teacher error:", e)
         return jsonify({"success": False, "message": "Server error"}), 500
+    
+
+
+
+
+
+
+
+
+
+
+    # ===================== PARENT REGISTRATION =====================
+@app.route('/register/parent', methods=['POST'])
+def register_parent():
+    data = request.get_json()  # parse JSON from fetch
+    if not data:
+        return jsonify({'success': False, 'message': 'No data provided'}), 400
+
+    username = data.get('username')
+    name = data.get('name')
+    password = data.get('password')
+    children = data.get('children', [])
+
+    users_ref = db.reference('Users')
+    parents_ref = db.reference('Parents')
+
+    # Check if username exists
+    all_users = users_ref.get() or {}
+    for user in all_users.values():
+        if user.get('username') == username:
+            return jsonify({'success': False, 'message': 'Username already exists!'})
+
+    # Create user
+    new_user_ref = users_ref.push()
+    new_user_ref.set({
+        'userId': new_user_ref.key,
+        'username': username,
+        'name': name,
+        'password': password,
+        'role': 'parent',
+        'isActive': True
+    })
+
+    # Create parent entry with children
+    new_parent_ref = parents_ref.push()
+    new_parent_ref.set({
+        'userId': new_user_ref.key,
+        'children': children
+    })
+
+    return jsonify({'success': True, 'message': 'Parent registered successfully!'})
+
     
 
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaFacebookMessenger ,  FaSearch  } from "react-icons/fa";
 import { AiFillPicture } from "react-icons/ai";
 import "../styles/global.css";
 
@@ -138,6 +138,11 @@ function MyPosts() {
       <div className="icon-circle">
         <FaBell />
       </div>
+
+        {/* Messenger */}
+    <div className="icon-circle">
+      <FaFacebookMessenger />
+    </div>
   
       {/* Settings */}
       <div className="icon-circle">

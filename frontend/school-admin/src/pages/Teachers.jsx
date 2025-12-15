@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaFacebookMessenger ,  FaSearch  } from "react-icons/fa";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 
@@ -86,6 +86,11 @@ function TeachersPage() {
         <div className="icon-circle">
           <FaBell />
         </div>
+
+          {/* Messenger */}
+    <div className="icon-circle">
+      <FaFacebookMessenger />
+    </div>
     
         {/* Settings */}
         <div className="icon-circle">

@@ -1,24 +1,35 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import "../styles/login.css"; // single CSS for both
+import { useNavigate, Link } from "react-router-dom";
+import "../styles/login.css";
 
-function TeacherRegister() {
+export default function Register() {
   const navigate = useNavigate();
+
+  const gradeOptions = ["9", "10", "11", "12"];
+  const sectionOptions = ["A", "B", "C"];
+  const subjectOptions = {
+    "9": ["Math", "English", "Biology", "History"],
+    "10": ["Math", "English", "Chemistry", "Geography"],
+    "11": ["Math", "Physics", "Biology", "Economics"],
+    "12": ["Math", "Physics", "Chemistry", "Literature"],
+  };
+
   const [formData, setFormData] = useState({
     name: "",
     username: "",
     password: "",
     courses: [{ grade: "", section: "", subject: "" }],
   });
-  const [profile, setProfile] = useState(null); // profile image
+  const [profile, setProfile] = useState(null);
   const [message, setMessage] = useState("");
 
-  // Handle input changes
   const handleChange = (e, index = null) => {
     const { name, value } = e.target;
     if (index !== null) {
       const updatedCourses = [...formData.courses];
       updatedCourses[index][name] = value;
+      // reset subject if grade changed
+      if (name === "grade") updatedCourses[index]["subject"] = "";
       setFormData({ ...formData, courses: updatedCourses });
     } else {
       setFormData({ ...formData, [name]: value });
@@ -37,8 +48,7 @@ function TeacherRegister() {
     setFormData({ ...formData, courses: updatedCourses });
   };
 
-  // Submit registration
-  const handleSubmit = async (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     setMessage("");
 
@@ -48,7 +58,7 @@ function TeacherRegister() {
       dataToSend.append("username", formData.username);
       dataToSend.append("password", formData.password);
       dataToSend.append("courses", JSON.stringify(formData.courses));
-      if (profile) dataToSend.append("profile", profile); // image file
+      if (profile) dataToSend.append("profile", profile);
 
       const res = await fetch("http://127.0.0.1:5000/register/teacher", {
         method: "POST",
@@ -58,16 +68,6 @@ function TeacherRegister() {
       const data = await res.json();
 
       if (data.success) {
-        // Store teacher info including profile image URL returned from backend
-        const teacherData = {
-          teacherId: data.teacherId || data.userId || "",
-          name: formData.name,
-          username: formData.username,
-          profileImage: data.profileImage || "/default-profile.png",
-        };
-        localStorage.setItem("teacher", JSON.stringify(teacherData));
-
-        setMessage("Teacher registered successfully!");
         setFormData({
           name: "",
           username: "",
@@ -76,14 +76,13 @@ function TeacherRegister() {
         });
         setProfile(null);
 
-        // Redirect to dashboard
-        navigate("/dashboard");
+        navigate("/login"); // go to login after successful registration
       } else {
-        setMessage(`Failed to register teacher: ${data.message}`);
+        setMessage(data.message || "Registration failed.");
       }
     } catch (err) {
-      setMessage("Error connecting to server.");
-      console.error(err);
+      console.error("Registration error:", err);
+      setMessage("Server error. Check console.");
     }
   };
 
@@ -93,7 +92,7 @@ function TeacherRegister() {
         <h2>Teacher Registration</h2>
         {message && <p className="auth-error">{message}</p>}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleRegister}>
           <input
             type="text"
             name="name"
@@ -119,7 +118,6 @@ function TeacherRegister() {
             required
           />
 
-          {/* Profile Image Upload */}
           <div className="profile-upload">
             {profile && (
               <img
@@ -138,30 +136,50 @@ function TeacherRegister() {
           <h3>Courses</h3>
           {formData.courses.map((course, index) => (
             <div className="course-group" key={index}>
-              <input
-                type="text"
-                name="subject"
-                placeholder="Subject"
-                value={course.subject}
-                onChange={(e) => handleChange(e, index)}
-                required
-              />
-              <input
-                type="text"
+              <select
                 name="grade"
-                placeholder="Grade"
                 value={course.grade}
                 onChange={(e) => handleChange(e, index)}
                 required
-              />
-              <input
-                type="text"
+              >
+                <option value="">Select Grade</option>
+                {gradeOptions.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+
+              <select
                 name="section"
-                placeholder="Section"
                 value={course.section}
                 onChange={(e) => handleChange(e, index)}
                 required
-              />
+              >
+                <option value="">Select Section</option>
+                {sectionOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                name="subject"
+                value={course.subject}
+                onChange={(e) => handleChange(e, index)}
+                required
+                disabled={!course.grade}
+              >
+                <option value="">Select Subject</option>
+                {course.grade &&
+                  subjectOptions[course.grade].map((subj) => (
+                    <option key={subj} value={subj}>
+                      {subj}
+                    </option>
+                  ))}
+              </select>
+
               {formData.courses.length > 1 && (
                 <button
                   type="button"
@@ -184,11 +202,9 @@ function TeacherRegister() {
         </form>
 
         <p className="auth-link">
-          Already have an account? <a href="/login">Go to Login</a>
+          Already have an account? <Link to="/login">Go to Login</Link>
         </p>
       </div>
     </div>
   );
 }
-
-export default TeacherRegister;

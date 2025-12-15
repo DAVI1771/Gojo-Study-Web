@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import "../styles/global.css";
 import { AiFillPicture, AiFillVideoCamera } from "react-icons/ai";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch  } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch, FaFacebookMessenger  } from "react-icons/fa";
 import { Link } from "react-router-dom";
 
 
@@ -159,6 +159,13 @@ const handleLike = async (postId) => {
       <FaBell />
     </div>
 
+
+
+    {/* Messenger */}
+    <div className="icon-circle">
+      <FaFacebookMessenger />
+    </div>
+
     {/* Settings */}
     <div className="icon-circle">
       <FaCog />
@@ -211,8 +218,10 @@ const handleLike = async (postId) => {
        > <FaHome style={{ width: "28px", height:"28px" }}/> Home</Link>
         <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
         <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
-          <Link className="sidebar-btn" to="/students" > <FaChalkboardTeacher /> Students
-                                </Link>
+          <Link className="sidebar-btn" to="/students" > <FaChalkboardTeacher /> Students</Link>
+           <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
+                      </Link>
+                                
          <Link className="sidebar-btn" to="/settings" >
                       <FaCog /> Settings
                     </Link>
