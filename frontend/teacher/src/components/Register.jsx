@@ -28,7 +28,6 @@ export default function Register() {
     if (index !== null) {
       const updatedCourses = [...formData.courses];
       updatedCourses[index][name] = value;
-      // reset subject if grade changed
       if (name === "grade") updatedCourses[index]["subject"] = "";
       setFormData({ ...formData, courses: updatedCourses });
     } else {
@@ -75,8 +74,7 @@ export default function Register() {
           courses: [{ grade: "", section: "", subject: "" }],
         });
         setProfile(null);
-
-        navigate("/login"); // go to login after successful registration
+        navigate("/login");
       } else {
         setMessage(data.message || "Registration failed.");
       }
@@ -144,9 +142,7 @@ export default function Register() {
               >
                 <option value="">Select Grade</option>
                 {gradeOptions.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
+                  <option key={g} value={g}>{g}</option>
                 ))}
               </select>
 
@@ -158,9 +154,7 @@ export default function Register() {
               >
                 <option value="">Select Section</option>
                 {sectionOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
+                  <option key={s} value={s}>{s}</option>
                 ))}
               </select>
 
@@ -172,33 +166,19 @@ export default function Register() {
                 disabled={!course.grade}
               >
                 <option value="">Select Subject</option>
-                {course.grade &&
-                  subjectOptions[course.grade].map((subj) => (
-                    <option key={subj} value={subj}>
-                      {subj}
-                    </option>
-                  ))}
+                {course.grade && subjectOptions[course.grade].map((subj) => (
+                  <option key={subj} value={subj}>{subj}</option>
+                ))}
               </select>
 
               {formData.courses.length > 1 && (
-                <button
-                  type="button"
-                  className="remove-btn"
-                  onClick={() => removeCourse(index)}
-                >
-                  Remove
-                </button>
+                <button type="button" className="remove-btn" onClick={() => removeCourse(index)}>Remove</button>
               )}
             </div>
           ))}
 
-          <button type="button" className="add-btn" onClick={addCourse}>
-            Add Course
-          </button>
-
-          <button type="submit" className="submit-btn">
-            Register
-          </button>
+          <button type="button" className="add-btn" onClick={addCourse}>Add Course</button>
+          <button type="submit" className="submit-btn">Register</button>
         </form>
 
         <p className="auth-link">

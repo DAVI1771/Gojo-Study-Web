@@ -1,37 +1,22 @@
 import json
-from flask import Flask, render_template, request, jsonify
-import firebase_admin
-from firebase_admin import credentials, db
-from flask_cors import CORS
-from flask import Flask
-from flask_cors import CORS
-from firebase_admin import storage
-from firebase_admin import credentials, db, storage
 import os
-from werkzeug.utils import secure_filename
-import uuid
-from datetime import datetime
 import sys
-from firebase_admin import db
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+import firebase_admin
+from firebase_admin import credentials, db, storage
 
-
-
-
-# Initialize Flask app
+# ---------------- FLASK APP ----------------
 app = Flask(__name__)
-CORS(app)
-
-# ✅ Fix CORS: allow all origins, methods, headers
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-
-# ---------------- FIREBASE ---------------- #
+# ---------------- FIREBASE ----------------
 firebase_json = "ethiostore-17d9f-firebase-adminsdk-5e87k-ff766d2648.json"
 if not os.path.exists(firebase_json):
     print("Firebase JSON missing")
     sys.exit()
 
-# Initialize Firebase Admin
 cred = credentials.Certificate(firebase_json)
 firebase_admin.initialize_app(cred, {
     "databaseURL": "https://ethiostore-17d9f-default-rtdb.firebaseio.com/",
@@ -84,12 +69,6 @@ def register_student():
     return jsonify({'success': True, 'message': 'Student registered successfully!'})
 
 
-
-
-
-
-
-
 # ===================== TEACHER REGISTRATION =====================
 @app.route('/register/teacher', methods=['POST'])
 def register_teacher():
@@ -119,7 +98,7 @@ def register_teacher():
         blob.make_public()
         profile_url = blob.public_url
 
-    # Create user and store profileImage
+    # Create user
     new_user_ref = users_ref.push()
     user_data = {
         'userId': new_user_ref.key,
@@ -128,7 +107,7 @@ def register_teacher():
         'password': password,
         'role': 'teacher',
         'isActive': True,
-        'profileImage': profile_url  # store profile URL
+        'profileImage': profile_url
     }
     new_user_ref.set(user_data)
 
@@ -136,7 +115,8 @@ def register_teacher():
     new_teacher_ref = teachers_ref.push()
     new_teacher_ref.set({
         'userId': new_user_ref.key,
-        'status': 'active'
+        'status': 'active',
+        'profileImage': profile_url
     })
 
     # Assign courses
@@ -163,56 +143,14 @@ def register_teacher():
     return jsonify({
         'success': True,
         'message': 'Teacher registered successfully!',
-        'teacherId': new_user_ref.key,
-        'profileImage': profile_url  # return URL to frontend
+        'teacherKey': new_teacher_ref.key,
+        'profileImage': profile_url
     })
 
 
-
-
-
-
-# ===================== TEACHER DASHBOARD PAGE =====================
-@app.route('/teacher/dashboard')
-def teacher_dashboard():
-    return render_template('teacher_dashboard.html')
-
-
-
-
-
-
-
-
-
-
-# ===================== FETCH TAKEN SUBJECTS =====================
-@app.route('/teachers/subjects/<grade>/<section>', methods=['GET'])
-def get_taken_subjects(grade, section):
-    assignments_ref = db.reference('TeacherAssignments')
-    courses_ref = db.reference('Courses')
-
-    all_assignments = assignments_ref.get() or {}
-    taken_subjects = []
-
-    for assign in all_assignments.values():
-        course_id = assign.get('courseId')
-        course = courses_ref.child(course_id).get()
-        if course and str(course.get('grade')) == grade and course.get('section') == section:
-            taken_subjects.append(course.get('subject'))
-
-    return jsonify({'takenSubjects': taken_subjects})
-
-
 # ===================== TEACHER LOGIN =====================
-
-
-@app.route("/api/teacher_login", methods=["POST", "OPTIONS"])
+@app.route("/api/teacher_login", methods=["POST"])
 def teacher_login():
-    if request.method == "OPTIONS":
-        # Preflight request for CORS
-        return '', 200
-
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
@@ -220,47 +158,47 @@ def teacher_login():
     if not username or not password:
         return jsonify({"success": False, "message": "Username and password required"}), 400
 
-    try:
-        users_ref = db.reference("Users")
-        all_users = users_ref.get() or {}
+    users_ref = db.reference("Users")
+    teachers_ref = db.reference("Teachers")
 
-        # Find user with role 'teacher' and matching username
-        teacher_user = None
-        for user_id, user in all_users.items():
-            if user.get("username") == username and user.get("role") == "teacher":
-                teacher_user = {"userId": user_id, **user}
-                break
+    all_users = users_ref.get() or {}
+    all_teachers = teachers_ref.get() or {}
 
-        if not teacher_user:
-            return jsonify({"success": False, "message": "Teacher not found"}), 404
+    teacher_user = None
+    teacher_key = None
+    for key, user in all_users.items():
+        if user.get("username") == username and user.get("role") == "teacher":
+            teacher_user = user
+            # Match with Teachers node
+            for tkey, tdata in all_teachers.items():
+                if tdata.get("userId") == key:
+                    teacher_key = tkey
+                    break
+            break
 
-        # Check password
-        if teacher_user.get("password") != password:
-            return jsonify({"success": False, "message": "Invalid password"}), 401
+    if not teacher_user or not teacher_key:
+        return jsonify({"success": False, "message": "Teacher not found"}), 404
 
-        # Optional: fetch teacher profile image from Teachers node
-        teachers_ref = db.reference("Teachers")
-        teacher_profile = teachers_ref.child(teacher_user["userId"]).get() or {}
-        profile_image = teacher_profile.get("profileImage", "/default-profile.png")
+    if teacher_user.get("password") != password:
+        return jsonify({"success": False, "message": "Invalid password"}), 401
 
-        # Return teacher info
-        return jsonify({
-            "success": True,
-            "teacher": {
-                "teacherId": teacher_user["userId"],
-                "name": teacher_user.get("name"),
-                "username": teacher_user.get("username"),
-                "profileImage": profile_image
-            }
-        })
+    profile_image = all_teachers.get(teacher_key, {}).get("profileImage", "/default-profile.png")
 
-    except Exception as e:
-        print("Login error:", e)
-        return jsonify({"success": False, "message": "Server error"}), 500
+    return jsonify({
+        "success": True,
+        "teacher": {
+            "teacherKey": teacher_key,
+            "userId": teacher_user["userId"],
+            "name": teacher_user.get("name"),
+            "username": teacher_user.get("username"),
+            "profileImage": profile_image
+        }
+    })
 
 
-@app.route('/api/teacher/<teacher_id>/courses', methods=['GET'])
-def get_teacher_courses(teacher_id):
+# ===================== GET TEACHER COURSES =====================
+@app.route('/api/teacher/<teacher_key>/courses', methods=['GET'])
+def get_teacher_courses(teacher_key):
     assignments_ref = db.reference('TeacherAssignments')
     courses_ref = db.reference('Courses')
 
@@ -268,11 +206,12 @@ def get_teacher_courses(teacher_id):
     courses_list = []
 
     for assign in all_assignments.values():
-        if assign.get('teacherId') == teacher_id:
+        if assign.get('teacherId') == teacher_key:
             course_id = assign.get('courseId')
             course_data = courses_ref.child(course_id).get()
             if course_data:
                 courses_list.append({
+                    'courseId': course_id,
                     'subject': course_data.get('subject'),
                     'grade': course_data.get('grade'),
                     'section': course_data.get('section')
@@ -281,72 +220,84 @@ def get_teacher_courses(teacher_id):
     return jsonify({'courses': courses_list})
 
 
+# ===================== GET TEACHER STUDENTS =====================
+@app.route("/api/teacher/<user_id>/students", methods=["GET"])
+def get_teacher_students(user_id):
+    teachers_ref = db.reference("Teachers")
+    assignments_ref = db.reference("TeacherAssignments")
+    courses_ref = db.reference("Courses")
+    students_ref = db.reference("Students")
+    users_ref = db.reference("Users")
+    marks_ref = db.reference("ClassMarks")
 
+    # 1️⃣ Get the teacher key from Teachers node using user_id
+    teacher_key = None
+    all_teachers = teachers_ref.get() or {}
+    for key, teacher in all_teachers.items():
+        if teacher.get("userId") == user_id:
+            teacher_key = key
+            break
 
+    if not teacher_key:
+        return jsonify({"courses": [], "message": "Teacher not found"})
 
-@app.route('/api/teacher/<teacher_id>/students', methods=['GET'])
-def get_teacher_students(teacher_id):
-    assignments_ref = db.reference('TeacherAssignments')
-    courses_ref = db.reference('Courses')
-    students_ref = db.reference('Students')
-    users_ref = db.reference('Users')
-    marks_ref = db.reference('ClassMarks')
-
+    # 2️⃣ Get all assignments for this teacher
     all_assignments = assignments_ref.get() or {}
     course_students = []
 
     for assign in all_assignments.values():
-        if assign.get('teacherId') != teacher_id:
+        if assign.get("teacherId") != teacher_key:
             continue
 
-        course_id = assign.get('courseId')
+        course_id = assign.get("courseId")
         course_data = courses_ref.child(course_id).get()
         if not course_data:
             continue
 
-        grade = course_data.get('grade')
-        section = course_data.get('section')
-        subject = course_data.get('subject')
+        grade = course_data.get("grade")
+        section = course_data.get("section")
+        subject = course_data.get("subject")
 
-        # Fetch all students in this grade + section
-        all_students = students_ref.get() or {}
+        # 3️⃣ Fetch students in this grade + section
         students_list = []
+        all_students = students_ref.get() or {}
         for student_id, student in all_students.items():
-            if student.get('grade') == grade and student.get('section') == section:
-                user_data = users_ref.child(student.get('userId')).get()
+            if student.get("grade") == grade and student.get("section") == section:
+                user_data = users_ref.child(student.get("userId")).get()
                 if not user_data:
                     continue
 
-                # Fetch marks from ClassMarks node
-                student_marks = marks_ref.child(student_id).child(course_id).get() or {}
-                
+                # Get marks for this course
+                student_marks = marks_ref.child(course_id).child(student_id).get() or {}
+
                 students_list.append({
-                    'name': user_data.get('name'),
-                    'username': user_data.get('username'),
-                    'marks': student_marks
+                    "studentId": student_id,
+                    "name": user_data.get("name"),
+                    "username": user_data.get("username"),
+                    "marks": {
+                        "mark20": student_marks.get("mark20", 0),
+                        "mark30": student_marks.get("mark30", 0),
+                        "mark50": student_marks.get("mark50", 0)
+                    }
                 })
 
-        # Avoid duplicate grade-section
-        exists = next((c for c in course_students if c['grade'] == grade and c['section'] == section and c['subject'] == subject), None)
-        if not exists:
-            course_students.append({
-                'subject': subject,
-                'grade': grade,
-                'section': section,
-                'students': students_list
-            })
+        course_students.append({
+            "subject": subject,
+            "grade": grade,
+            "section": section,
+            "students": students_list
+        })
 
-    return jsonify({'courses': course_students})
+    return jsonify({"courses": course_students})
 
 
-# ===================== GET STUDENTS OF A COURSE =====================
 # ===================== GET STUDENTS OF A COURSE =====================
 @app.route('/api/course/<course_id>/students', methods=['GET'])
 def get_course_students(course_id):
     courses_ref = db.reference('Courses')
     students_ref = db.reference('Students')
     users_ref = db.reference('Users')
-    marks_ref = db.reference('ClassMarks')  # New marks node
+    marks_ref = db.reference('ClassMarks')
 
     course = courses_ref.child(course_id).get()
     if not course:
@@ -356,16 +307,16 @@ def get_course_students(course_id):
     section = course.get('section')
 
     all_students = students_ref.get() or {}
+    all_users = users_ref.get() or {}
     course_students = []
 
     for student_id, student in all_students.items():
         if student.get('grade') == grade and student.get('section') == section:
-            user_data = users_ref.child(student.get('userId')).get()
+            user_data = all_users.get(student.get('userId'))
             if user_data:
-                # Fetch marks from ClassMarks node
                 student_marks = marks_ref.child(course_id).child(student_id).get() or {}
                 course_students.append({
-                    'studentId': student_id,  # include studentId
+                    'studentId': student_id,
                     'name': user_data.get('name'),
                     'username': user_data.get('username'),
                     'marks': {
@@ -391,101 +342,52 @@ def get_course_students(course_id):
 def update_course_marks(course_id):
     data = request.json
     updates = data.get('updates', [])
-
-    marks_ref = db.reference('ClassMarks')  # Use the new node
+    marks_ref = db.reference('ClassMarks')
 
     for update in updates:
-        student_id = update.get('studentId')  # ✅ use studentId from JS
+        student_id = update.get('studentId')
         marks = update.get('marks', {})
-
-        # Save marks for this student under the course
         marks_ref.child(course_id).child(student_id).set({
             'mark20': marks.get('mark20', 0),
             'mark30': marks.get('mark30', 0),
             'mark50': marks.get('mark50', 0)
-            
         })
 
     return jsonify({'success': True, 'message': 'Marks updated successfully!'})
 
 
-
-
-
+# ===================== GET POSTS =====================
 @app.route("/api/get_posts", methods=["GET"])
 def get_posts():
-    try:
-        posts_ref = db.reference("Posts")
-        admins_ref = db.reference("School_Admins")
+    posts_ref = db.reference("Posts")
+    admins_ref = db.reference("School_Admins")
 
-        all_posts = posts_ref.get() or {}
-        result = []
+    all_posts = posts_ref.get() or {}
+    result = []
 
-        for post_id, post in all_posts.items():
-            admin_id = post.get("adminId")
-            admin = admins_ref.child(admin_id).get() or {}
-
-            admin_name = admin.get("name", "Admin")
-            admin_profile = admin.get("profileImage", "/default-profile.png")
-
-            result.append({
-                "postId": post_id,
-                "adminId": admin_id,
-                "adminName": admin_name,
-                "adminProfile": admin_profile,
-                "message": post.get("message", ""),
-                "postUrl": post.get("postUrl"),
-                "timestamp": post.get("time", ""),  # use 'time' from your DB
-                "likeCount": post.get("likeCount", 0),
-                "likes": post.get("likes", {})
-            })
-
-        # Sort posts by timestamp descending
-        result.sort(key=lambda x: x["timestamp"], reverse=True)
-
-        return jsonify(result)
-
-    except Exception as e:
-        print("Get posts error:", e)
-        return jsonify([]), 500
-
-
-
-@app.route("/api/teacher/<teacher_id>", methods=["GET"])
-def get_teacher(teacher_id):
-    try:
-        users_ref = db.reference("Users")
-        teacher_user = users_ref.child(teacher_id).get()
-        if not teacher_user or teacher_user.get("role") != "teacher":
-            return jsonify({"success": False, "message": "Teacher not found"})
-
-        return jsonify({
-            "success": True,
-            "teacher": {
-                "teacherId": teacher_id,
-                "name": teacher_user.get("name"),
-                "username": teacher_user.get("username"),
-                "profileImage": teacher_user.get("profileImage", "/default-profile.png")
-            }
+    for post_id, post in all_posts.items():
+        admin_id = post.get("adminId")
+        admin = admins_ref.child(admin_id).get() or {}
+        result.append({
+            "postId": post_id,
+            "adminId": admin_id,
+            "adminName": admin.get("name", "Admin"),
+            "adminProfile": admin.get("profileImage", "/default-profile.png"),
+            "message": post.get("message", ""),
+            "postUrl": post.get("postUrl"),
+            "timestamp": post.get("time", ""),
+            "likeCount": post.get("likeCount", 0),
+            "likes": post.get("likes", {})
         })
-    except Exception as e:
-        print("Get teacher error:", e)
-        return jsonify({"success": False, "message": "Server error"}), 500
-    
+
+    result.sort(key=lambda x: x["timestamp"], reverse=True)
+    return jsonify(result)
 
 
-
-
-
-
-
-
-
-
-    # ===================== PARENT REGISTRATION =====================
+# ===================== PARENT REGISTRATION =====================
 @app.route('/register/parent', methods=['POST'])
 def register_parent():
-    data = request.get_json()  # parse JSON from fetch
+    data = request.get_json()
     if not data:
         return jsonify({'success': False, 'message': 'No data provided'}), 400
 
@@ -514,7 +416,7 @@ def register_parent():
         'isActive': True
     })
 
-    # Create parent entry with children
+    # Create parent entry
     new_parent_ref = parents_ref.push()
     new_parent_ref.set({
         'userId': new_user_ref.key,
@@ -522,13 +424,6 @@ def register_parent():
     })
 
     return jsonify({'success': True, 'message': 'Parent registered successfully!'})
-
-    
-
-
-
-
-    
 
 
 # ===================== RUN APP =====================
