@@ -432,14 +432,12 @@ function StudentsPage() {
   )}
 </div>
 
-
-{/* CHAT POPUP (Instagram Style) */}
 {/* STUDENT CHAT POPUP */}
 {studentChatOpen && selectedStudent && (
   <div
     style={{
       position: "fixed",
-      bottom: "90px",
+      bottom: "6px",
       width: "320px",
       background: "#fff",
       borderRadius: "12px",
@@ -447,7 +445,6 @@ function StudentsPage() {
       padding: "15px",
       zIndex: 999,
       right: "22px",
-      bottom: "6px",
       animation: "fadeIn 0.3s ease"
     }}
   >
@@ -468,7 +465,7 @@ function StudentsPage() {
         <button
           onClick={() => {
             setStudentChatOpen(false);
-            navigate("/student-chat", { state: { studentId: selectedStudent.studentId } });
+            navigate("/all-chat", { state: { studentId: selectedStudent.studentId, userType: "student" } });
           }}
           style={{
             background: "none",
