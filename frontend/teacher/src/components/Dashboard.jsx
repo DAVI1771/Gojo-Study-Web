@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaSearch } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaSearch,  FaClipboardCheck, FaUsers } from "react-icons/fa";
 import axios from "axios";
 import "../styles/global.css";
 
@@ -74,9 +74,19 @@ export default function Dashboard() {
 
           <div className="sidebar-menu">
             <Link className="sidebar-btn" to="/dashboard" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
-            <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
-            <Link className="sidebar-btn" to="/students"><FaChalkboardTeacher /> Students</Link>
+           
+            
+            <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
+            <Link
+                     className="sidebar-btn"
+                     to="/marks"
+                     
+                   ><FaClipboardCheck />
+                     Marks
+                   </Link>
+                   <Link to="/attendance" className="sidebar-btn">
+                                                        <FaUsers /> Attendance
+                                                      </Link>
             <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
             <button className="sidebar-btn logout-btn" onClick={handleLogout}><FaSignOutAlt /> Logout</button>
           </div>
