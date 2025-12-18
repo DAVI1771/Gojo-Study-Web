@@ -28,13 +28,23 @@ bucket = storage.bucket()
 # ===================== HOME PAGE =====================
 @app.route('/')
 def home():
-    return render_template('parent_register.html')
+    return render_template('student_register.html')
 
 
 # ===================== STUDENT REGISTRATION =====================
 @app.route('/register/student', methods=['POST'])
 def register_student():
-    data = request.json
+    data = request.form
+    profile_file = request.files.get('profile')
+
+    username = data.get('username')
+    name = data.get('name')
+    password = data.get('password')
+    grade = data.get('grade')
+    section = data.get('section')
+
+    if not all([username, name, password, grade, section]):
+        return jsonify({'success': False, 'message': 'All fields are required'}), 400
 
     users_ref = db.reference('Users')
     students_ref = db.reference('Students')
@@ -42,16 +52,26 @@ def register_student():
     # Check if username exists
     all_users = users_ref.get() or {}
     for user in all_users.values():
-        if user.get('username') == data['username']:
+        if user.get('username') == username:
             return jsonify({'success': False, 'message': 'Username already exists!'})
+
+    # Upload profile image
+    profile_url = "/default-profile.png"
+    if profile_file:
+        filename = f"students/{username}_{profile_file.filename}"
+        blob = bucket.blob(filename)
+        blob.upload_from_file(profile_file, content_type=profile_file.content_type)
+        blob.make_public()
+        profile_url = blob.public_url
 
     # Create user
     new_user_ref = users_ref.push()
     new_user_ref.set({
         'userId': new_user_ref.key,
-        'username': data['username'],
-        'name': data['name'],
-        'password': data['password'],
+        'username': username,
+        'name': name,
+        'password': password,  # ⚠ hash later
+        'profileImage': profile_url,
         'role': 'student',
         'isActive': True
     })
@@ -61,13 +81,12 @@ def register_student():
     new_student_ref.set({
         'userId': new_user_ref.key,
         'academicYear': '2024_2025',
-        'grade': data['grade'],
-        'section': data['section'],
+        'grade': grade,
+        'section': section,
         'status': 'active'
     })
 
     return jsonify({'success': True, 'message': 'Student registered successfully!'})
-
 
 # ===================== TEACHER REGISTRATION =====================
 @app.route('/register/teacher', methods=['POST'])
