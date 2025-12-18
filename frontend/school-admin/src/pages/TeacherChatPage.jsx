@@ -13,36 +13,42 @@ function TeacherChatPage() {
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState("");
 
+  // ADMIN USER (must contain userId)
   const admin = JSON.parse(localStorage.getItem("admin")) || {};
 
-  // Fetch teachers and recent chats
+  const BASE_URL = "https://ethiostore-17d9f-default-rtdb.firebaseio.com";
+
+  // ---------------- FETCH TEACHERS ----------------
   useEffect(() => {
     const fetchTeachers = async () => {
       try {
-        const teachersRes = await axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json");
-        const usersRes = await axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json");
+        const teachersRes = await axios.get(`${BASE_URL}/Teachers.json`);
+        const usersRes = await axios.get(`${BASE_URL}/Users.json`);
 
         const teachersData = teachersRes.data || {};
         const usersData = usersRes.data || {};
 
-        const teacherList = Object.keys(teachersData).map(id => {
+        const teacherList = Object.keys(teachersData).map((id) => {
           const teacher = teachersData[id];
           const user = usersData[teacher.userId] || {};
+
           return {
             teacherId: id,
+            userId: teacher.userId, // used for chat
             name: user.name || "No Name",
-            profileImage: user.profileImage || "/default-profile.png"
+            profileImage: user.profileImage || "/default-profile.png",
           };
         });
 
         setTeachers(teacherList);
+        setRecentChats(teacherList.map((t) => t.teacherId));
 
         if (teacherIdFromState) {
-          const selected = teacherList.find(t => t.teacherId === teacherIdFromState);
+          const selected = teacherList.find(
+            (t) => t.teacherId === teacherIdFromState
+          );
           if (selected) setSelectedTeacher(selected);
         }
-
-        setRecentChats(teacherList.slice(0, 5).map(t => t.teacherId));
       } catch (err) {
         console.error("Error fetching teachers:", err);
       }
@@ -51,59 +57,87 @@ function TeacherChatPage() {
     fetchTeachers();
   }, [teacherIdFromState]);
 
-  // Fetch messages for selected teacher
+  // ---------------- FETCH MESSAGES ----------------
   useEffect(() => {
-    if (!selectedTeacher) return;
+    if (!selectedTeacher || !admin.userId) return;
+
+    const conversationId = `${admin.userId}_${selectedTeacher.userId}`;
 
     const fetchMessages = async () => {
       try {
-        const messagesRes = await axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherMessages.json");
-        const allMessages = messagesRes.data || {};
-        const chatMessages = Object.values(allMessages).filter(
-          m => m.teacherId === selectedTeacher.teacherId
+        const res = await axios.get(
+          `${BASE_URL}/Chats/${conversationId}/messages.json`
         );
-        setMessages(chatMessages);
+
+        const data = res.data || {};
+
+        const messageList = Object.keys(data).map((key) => ({
+          id: key,
+          ...data[key],
+        })).sort((a, b) => a.timeStamp - b.timeStamp);
+
+        setMessages(messageList);
       } catch (err) {
-        console.error("Error fetching messages:", err);
+        console.error("Error fetching chat messages:", err);
       }
     };
 
     fetchMessages();
-  }, [selectedTeacher]);
+  }, [selectedTeacher, admin.userId]);
 
+  // ---------------- SEND MESSAGE ----------------
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedTeacher) return;
+    if (!messageInput.trim() || !selectedTeacher || !admin.userId) return;
+
+    const conversationId = `${admin.userId}_${selectedTeacher.userId}`;
 
     const newMessage = {
-      teacherId: selectedTeacher.teacherId,
-      adminId: admin.adminId,
+      senderId: admin.userId,
+      receiverId: selectedTeacher.userId,
       text: messageInput,
-      time: new Date().toISOString()
+      timeStamp: Date.now(),
     };
 
     try {
-      await axios.post(
-        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherMessages.json",
+      // Push message to Firebase (will generate unique key)
+      const res = await axios.post(
+        `${BASE_URL}/Chats/${conversationId}/messages.json`,
         newMessage
       );
 
-      setMessages(prev => [...prev, newMessage]);
+      // Add Firebase generated ID to the message locally
+      setMessages((prev) => [
+        ...prev,
+        { id: res.data.name, ...newMessage },
+      ]);
+
       setMessageInput("");
-      setRecentChats(prev => [selectedTeacher.teacherId, ...prev.filter(id => id !== selectedTeacher.teacherId)]);
     } catch (err) {
       console.error("Error sending message:", err);
     }
   };
 
+  // ---------------- UI ----------------
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "Arial, sans-serif" }}>
-      {/* LEFT PANEL - Recent Chats */}
-      <div style={{ width: "280px", borderRight: "1px solid #ddd", overflowY: "auto", background: "#fff" }}>
-        <h3 style={{ padding: "15px", borderBottom: "1px solid #ddd" }}>Chats</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "5px", padding: "10px" }}>
-          {recentChats.map(id => {
-            const t = teachers.find(t => t.teacherId === id);
+      {/* LEFT PANEL */}
+      <div
+        style={{
+          width: "280px",
+          borderRight: "1px solid #ddd",
+          background: "#fff",
+          overflowY: "auto",
+        }}
+      >
+        <h3 style={{ padding: "15px", borderBottom: "1px solid #ddd" }}>
+          Chats
+        </h3>
+
+        <div style={{ padding: "10px" }}>
+          {recentChats.map((id) => {
+            const t = teachers.find((x) => x.teacherId === id);
             if (!t) return null;
+
             return (
               <div
                 key={id}
@@ -113,9 +147,11 @@ function TeacherChatPage() {
                   alignItems: "center",
                   padding: "8px",
                   cursor: "pointer",
-                  background: selectedTeacher?.teacherId === id ? "#e0e7ff" : "transparent",
                   borderRadius: "8px",
-                  transition: "0.2s"
+                  background:
+                    selectedTeacher?.teacherId === id
+                      ? "#e0e7ff"
+                      : "transparent",
                 }}
               >
                 <img
@@ -126,8 +162,7 @@ function TeacherChatPage() {
                     height: "40px",
                     borderRadius: "50%",
                     marginRight: "10px",
-                    border: selectedTeacher?.teacherId === id ? "2px solid #4b6cb7" : "2px solid transparent",
-                    objectFit: "cover"
+                    objectFit: "cover",
                   }}
                 />
                 <span>{t.name}</span>
@@ -137,86 +172,89 @@ function TeacherChatPage() {
         </div>
       </div>
 
-      {/* RIGHT PANEL - Chat */}
+      {/* RIGHT PANEL */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        {/* Chat Header - Fixed */}
-        <div style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "#fff",
-          padding: "15px",
-          borderBottom: "1px solid #ddd",
-          display: "flex",
-          alignItems: "center",
-          gap: "10px"
-        }}>
-          <button
-            onClick={() => navigate("/teachers")}
-            style={{
-              marginRight: "10px",
-              padding: "5px 10px",
-              borderRadius: "5px",
-              border: "none",
-              cursor: "pointer",
-              background: "#ddd"
-            }}
-          >
-            ← Back
-          </button>
+        {/* HEADER */}
+        <div
+          style={{
+            padding: "15px",
+            borderBottom: "1px solid #ddd",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            background: "#fff",
+          }}
+        >
+          <button onClick={() => navigate("/teachers")}>← Back</button>
+
           {selectedTeacher ? (
             <>
-              <img src={selectedTeacher.profileImage} alt={selectedTeacher.name} style={{ width: "40px", height: "40px", borderRadius: "50%" }} />
+              <img
+                src={selectedTeacher.profileImage}
+                alt=""
+                style={{ width: "40px", height: "40px", borderRadius: "50%" }}
+              />
               <strong>{selectedTeacher.name}</strong>
             </>
           ) : (
-            <span style={{ color: "#aaa" }}>Select a teacher to chat</span>
+            <span>Select a teacher</span>
           )}
         </div>
 
-        {/* Chat Body */}
-        <div style={{ flex: 1, padding: "15px", overflowY: "auto", background: "#f9f9f9" }}>
-          {selectedTeacher && messages.length === 0 && (
-            <p style={{ color: "#aaa", textAlign: "center" }}>Start chatting with {selectedTeacher.name}...</p>
-          )}
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              style={{
-                maxWidth: "70%",
-                marginBottom: "10px",
-                padding: "10px",
-                borderRadius: "10px",
-                background: msg.adminId === admin.adminId ? "#4b6cb7" : "#ddd",
-                color: msg.adminId === admin.adminId ? "#fff" : "#000",
-                alignSelf: msg.adminId === admin.adminId ? "flex-end" : "flex-start"
-              }}
-            >
-              {msg.text}
-              <div style={{ fontSize: "10px", marginTop: "3px", color: msg.adminId === admin.adminId ? "#ccc" : "#555" }}>
-                {new Date(msg.time).toLocaleTimeString()}
+        {/* CHAT BODY */}
+        <div
+          style={{
+            flex: 1,
+            padding: "15px",
+            overflowY: "auto",
+            background: "#f9f9f9",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {messages.map((msg) => {
+            const isMe = msg.senderId === admin.userId;
+
+            return (
+              <div
+                key={msg.id}
+                style={{
+                  alignSelf: isMe ? "flex-end" : "flex-start",
+                  background: isMe ? "#4b6cb7" : "#ddd",
+                  color: isMe ? "#fff" : "#000",
+                  padding: "10px",
+                  borderRadius: "10px",
+                  maxWidth: "70%",
+                  marginBottom: "8px",
+                }}
+              >
+                {msg.text}
+                <div style={{ fontSize: "10px", opacity: 0.7 }}>
+                  {new Date(msg.timeStamp).toLocaleTimeString()}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Chat Input */}
+        {/* INPUT */}
         {selectedTeacher && (
-          <div style={{ padding: "15px", borderTop: "1px solid #ddd", display: "flex", gap: "10px" }}>
+          <div
+            style={{
+              padding: "15px",
+              borderTop: "1px solid #ddd",
+              display: "flex",
+              gap: "10px",
+            }}
+          >
             <input
-              type="text"
-              placeholder="Type a message..."
               value={messageInput}
-              onChange={e => setMessageInput(e.target.value)}
-              style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid #ccc" }}
-              onKeyDown={e => e.key === "Enter" && handleSendMessage()}
+              onChange={(e) => setMessageInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+              placeholder="Type a message..."
+              style={{ flex: 1, padding: "10px" }}
             />
-            <button
-              onClick={handleSendMessage}
-              style={{ background: "#4b6cb7", padding: "10px 15px", color: "#fff", borderRadius: "8px", border: "none", cursor: "pointer" }}
-            >
-              Send
-            </button>
+            <button onClick={handleSendMessage}>Send</button>
           </div>
         )}
       </div>

@@ -34,14 +34,16 @@ function StudentsPage() {
         const studentList = Object.keys(studentsData).map((id) => {
           const student = studentsData[id];
           const user = usersData[student.userId] || {};
-          return {
-            studentId: id,
-            name: user.name || user.username || "No Name",
-            profileImage: user.profileImage || "/default-profile.png",
-            grade: student.grade,
-            section: student.section,
-            email: user.email || ""
-          };
+         return {
+  studentId: id,
+  userId: student.userId, // <-- Add this
+  name: user.name || user.username || "No Name",
+  profileImage: user.profileImage || "/default-profile.png",
+  grade: student.grade,
+  section: student.section,
+  email: user.email || ""
+};
+
         });
 
         setStudents(studentList);
@@ -71,16 +73,16 @@ function StudentsPage() {
     return true;
   });
 
-  // ------------------ FETCH MESSAGES FOR CHAT POPUP ------------------
- useEffect(() => {
+ // ------------------ FETCH MESSAGES ------------------
+  useEffect(() => {
   if (studentChatOpen && selectedStudent) {
+    const key = `${selectedStudent.userId}_${admin.userId}`;
     const fetchMessages = async () => {
       try {
-        const url = `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentMessages.json`;
-        const res = await axios.get(url);
-        const allMessages = Object.values(res.data || {})
-          .filter(m => m.studentId === selectedStudent.studentId);
-        setPopupMessages(allMessages);
+        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`);
+        const messagesData = res.data || {};
+        const messagesList = Object.keys(messagesData).map(id => messagesData[id]);
+        setPopupMessages(messagesList);
       } catch (err) {
         console.error("Error fetching messages:", err);
       }
@@ -92,27 +94,29 @@ function StudentsPage() {
 
   // ------------------ SEND MESSAGE ------------------
   const handleSendMessage = async () => {
-    if (!popupInput.trim()) return;
+  if (!popupInput.trim() || !selectedStudent) return;
 
-   const newMessage = {
-  studentId: selectedStudent.studentId,
-  adminId: admin.adminId,
-  content: popupInput,
-  timestamp: new Date().toISOString(),
-};
+  const key = `${selectedStudent.userId}_${admin.userId}`;
+  const newMessage = {
+    senderId: admin.userId,
+    receiverId: selectedStudent.userId,
+    content: popupInput,
+    timeStamp: Date.now(),
 
-    try {
-      // Push message to Firebase
-      await axios.post(
-  `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentMessages.json`,
-  newMessage
-);
-      setPopupMessages([...popupMessages, newMessage]);
-      setPopupInput(""); // Clear input
-    } catch (err) {
-      console.error("Error sending message:", err);
-    }
+    
   };
+
+  try {
+    await axios.post(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`,
+      newMessage
+    );
+    setPopupMessages([...popupMessages, newMessage]);
+    setPopupInput("");
+  } catch (err) {
+    console.error("Error sending message:", err);
+  }
+};
 
   return (
     <div className="dashboard-page">
@@ -371,14 +375,18 @@ function StudentsPage() {
                 <p style={{ color: "#aaa", textAlign: "center" }}>No messages yet</p>
               ) : (
                 popupMessages.map((msg, index) => (
-                  <div key={index} style={{ marginBottom: "10px", textAlign: msg.sender === "admin" ? "right" : "left" }}>
-                    <span style={{
-                      background: msg.sender === "admin" ? "#4b6cb7" : "#eee",
-                      color: msg.sender === "admin" ? "#fff" : "#000",
-                      padding: "6px 12px",
-                      borderRadius: "12px",
-                      display: "inline-block"
-                    }}>{msg.text}</span>
+                  <div key={index} style={{ marginBottom: "10px", 
+                  textAlign: msg.senderId === admin.userId ? "right" : "left" }}>
+                   <span style={{
+  background: msg.senderId === admin.userId ? "#4b6cb7" : "#eee",
+  color: msg.senderId === admin.userId ? "#fff" : "#000",
+  padding: "6px 12px",
+  borderRadius: "12px",
+  display: "inline-block"
+}}>
+  {msg.content}
+</span>
+
                   </div>
                 ))
               )}

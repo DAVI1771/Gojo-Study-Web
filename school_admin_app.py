@@ -113,10 +113,12 @@ def login_admin():
         admins = school_admin_ref.get() or {}
         for admin in admins.values():
             if admin.get("userId") == matched_user.get("userId"):
+                # ✅ FIXED: return userId from Users node
                 return jsonify({
                     "success": True,
                     "message": "Login success",
                     "adminId": admin.get("adminId"),
+                    "userId": matched_user.get("userId"),   # 🔥 ADD THIS
                     "name": matched_user.get("name"),
                     "username": matched_user.get("username"),
                     "profileImage": matched_user.get("profileImage", "")

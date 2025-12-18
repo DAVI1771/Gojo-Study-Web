@@ -16,15 +16,16 @@ function Login() {
       });
 
       if (res.data.success) {
-        localStorage.setItem(
-          "admin",
-          JSON.stringify({
-            adminId: res.data.adminId,
-            name: res.data.name,
-            username: res.data.username,
-            profileImage: res.data.profileImage || "/default-profile.png",
-          })
-        );
+       localStorage.setItem(
+  "admin",
+  JSON.stringify({
+    userId: res.data.userId,   // ✅ REQUIRED
+    name: res.data.name,
+    username: res.data.username,
+    profileImage: res.data.profileImage || "/default-profile.png",
+    role: "admin"
+  })
+);
 
         navigate("/dashboard");
       } else {

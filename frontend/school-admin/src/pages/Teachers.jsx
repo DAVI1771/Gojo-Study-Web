@@ -18,14 +18,19 @@ function TeachersPage() {
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [teacherChatOpen, setTeacherChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
-
   const [popupMessages, setPopupMessages] = useState([]);
   const [popupInput, setPopupInput] = useState("");
 
   const navigate = useNavigate();
-  const admin = JSON.parse(localStorage.getItem("admin")) || {};
+ const admin = JSON.parse(localStorage.getItem("admin")) || {};
+const adminUserId = admin.userId;   // ✅ now it exists
 
-  // Fetch teachers
+
+
+
+
+
+  // ---------------- FETCH TEACHERS ----------------
   useEffect(() => {
     const fetchTeachers = async () => {
       try {
@@ -49,9 +54,7 @@ function TeachersPage() {
             .filter(a => a.teacherId === teacherId)
             .map(a => {
               const course = coursesData[a.courseId];
-              return course
-                ? { grade: course.grade, subject: course.subject, section: course.section }
-                : null;
+              return course ? { grade: course.grade, subject: course.subject, section: course.section } : null;
             })
             .filter(Boolean);
 
@@ -60,7 +63,8 @@ function TeachersPage() {
             name: user.name || "No Name",
             profileImage: user.profileImage || "/default-profile.png",
             gradesSubjects,
-            email: user.email || null
+            email: user.email || null,
+            userId: teacher.userId
           };
         });
 
@@ -73,57 +77,68 @@ function TeachersPage() {
     fetchTeachers();
   }, []);
 
-  // Filter teachers by grade
+  // ---------------- FILTER TEACHERS ----------------
   const filteredTeachers =
     selectedGrade === "All"
       ? teachers
       : teachers.filter(t => t.gradesSubjects.some(gs => gs.grade === selectedGrade));
 
-  // Fetch mini popup messages
-  useEffect(() => {
-    if (!teacherChatOpen || !selectedTeacher) return;
+  // ---------------- FETCH CHAT MESSAGES ----------------
+useEffect(() => {
+  if (!teacherChatOpen || !selectedTeacher) return;
 
-    const fetchMessages = async () => {
-      try {
-        const res = await axios.get(
-          "https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherMessages.json"
-        );
-        const all = res.data || {};
-        const msgs = Object.values(all).filter(
-          m => m.teacherId === selectedTeacher.teacherId
-        );
-        setPopupMessages(msgs.slice(-20));
-      } catch (err) {
-        console.error(err);
-      }
-    };
+  const fetchMessages = async () => {
+    try {
+      // Always use teacherUserId_adminUserId
+      const chatKey = `${selectedTeacher.userId}_${adminUserId}`;
 
-    fetchMessages();
-  }, [teacherChatOpen, selectedTeacher]);
+      const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
 
-  // Send mini popup message
-  const sendPopupMessage = async () => {
-    if (!popupInput.trim() || !selectedTeacher) return;
+      const msgs = Object.values(res.data || {}).map(m => ({
+        ...m,
+        sender: m.senderId === adminUserId ? "admin" : "teacher"
+      })).sort((a, b) => a.timeStamp - b.timeStamp);
 
-    const msg = {
-      teacherId: selectedTeacher.teacherId,
-      adminId: admin.adminId,
-      text: popupInput,
-      time: new Date().toISOString()
-    };
-
-    await axios.post(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherMessages.json",
-      msg
-    );
-
-    setPopupMessages(prev => [...prev, msg]);
-    setPopupInput("");
+      setPopupMessages(msgs);
+    } catch (err) {
+      console.error(err);
+      setPopupMessages([]);
+    }
   };
+
+  fetchMessages();
+}, [teacherChatOpen, selectedTeacher, adminUserId]);
+
+
+const sendPopupMessage = async () => {
+  if (!popupInput.trim() || !selectedTeacher) return;
+
+  const newMessage = {
+    senderId: adminUserId,
+    receiverId: selectedTeacher.userId,
+    text: popupInput,
+    timeStamp: Date.now()
+  };
+
+  try {
+    // Always use teacherUserId_adminUserId
+    const chatKey = `${selectedTeacher.userId}_${adminUserId}`;
+    const url = `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`;
+
+    await axios.post(url, newMessage);
+    setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+    setPopupInput("");
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+
+
 
   return (
     <div className="dashboard-page">
-      {/* ---------------- TOP NAVIGATION BAR ---------------- */}
+      {/* ---------------- TOP NAVBAR ---------------- */}
       <nav className="top-navbar">
         <h2>Gojo Dashboard</h2>
         <div className="nav-search">
@@ -139,7 +154,7 @@ function TeachersPage() {
       </nav>
 
       <div className="google-dashboard" style={{ display: "flex" }}>
-        {/* SIDEBAR */}
+        {/* ---------------- SIDEBAR ---------------- */}
         <div className="google-sidebar">
           <div className="sidebar-profile">
             <div className="sidebar-img-circle">
@@ -168,7 +183,7 @@ function TeachersPage() {
           </div>
         </div>
 
-        {/* MAIN CONTENT */}
+        {/* ---------------- MAIN CONTENT ---------------- */}
         <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
           <h2 style={{ marginBottom: "10px", textAlign: "center" }}>Teachers</h2>
 
@@ -224,18 +239,15 @@ function TeachersPage() {
                         width: "50px",
                         height: "50px",
                         borderRadius: "50%",
-                        marginTop: "-5px",
                         border: selectedTeacher?.teacherId === t.teacherId ? "3px solid #4b6cb7" : "3px solid red",
                         objectFit: "cover",
                         transition: "all 0.3s ease"
                       }}
                     />
-                    <h3 style={{ marginTop: "-30px" }}>{t.name}</h3>
+                    <h3>{t.name}</h3>
                   </div>
                   <div style={{ marginLeft: "70px", marginTop: "-25px", color: "#555" }}>
-                    {t.gradesSubjects.length > 0
-                      ? t.gradesSubjects.map(gs => gs.subject).join(", ")
-                      : "No assigned courses"}
+                    {t.gradesSubjects.length > 0 ? t.gradesSubjects.map(gs => gs.subject).join(", ") : "No assigned courses"}
                   </div>
                 </div>
               ))}
@@ -243,7 +255,7 @@ function TeachersPage() {
           )}
         </div>
 
-        {/* RIGHT SIDEBAR */}
+        {/* ---------------- RIGHT SIDEBAR ---------------- */}
         {selectedTeacher && (
           <div
             className="teacher-info-sidebar"
@@ -263,7 +275,7 @@ function TeachersPage() {
             {/* Teacher Info */}
             <div style={{ textAlign: "center" }}>
               <div style={{ background: "#becff7ff", padding: "25px 10px", height: "200px", width: "calc(100% + 50px)", margin: "-25px -25px 20px", textAlign: "center", boxShadow: "0 4px 15px rgba(0,0,0,0.1)" }}>
-                <div style={{ width: "100px", height: "100px", margin: "-20px auto 15px", borderRadius: "50%", overflow: "hidden", border: "4px solid #4b6cb7", boxShadow: "0 4px 15px rgba(0,0,0,0.1)" }}>
+                <div style={{ width: "100px", height: "100px", margin: "-20px auto 15px", borderRadius: "50%", overflow: "hidden", border: "4px solid #4b6cb7" }}>
                   <img src={selectedTeacher.profileImage} alt={selectedTeacher.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
                 <h2 style={{ margin: 0, fontSize: "22px", marginTop: "-10px", color: "#000" }}>{selectedTeacher.name}</h2>
@@ -309,35 +321,13 @@ function TeachersPage() {
                   </div>
                 )}
 
-                {activeTab === "schedule" && (
-                  <div>
-                    <h4 style={{ color: "#4b6cb7", marginBottom: "10px" }}>Schedule</h4>
-                    <p style={{ color: "#555" }}>Teacher schedule will be displayed here.</p>
-                  </div>
-                )}
-
-                {activeTab === "plan" && (
-                  <div>
-                    <h4 style={{ color: "#4b6cb7", marginBottom: "10px" }}>Teaching Plan</h4>
-                    <p style={{ color: "#555" }}>Teacher lesson plans will be shown here.</p>
-                  </div>
-                )}
+                {activeTab === "schedule" && <div><p style={{ color: "#555" }}>Teacher schedule will be displayed here.</p></div>}
+                {activeTab === "plan" && <div><p style={{ color: "#555" }}>Teacher lesson plans will be shown here.</p></div>}
 
                 {/* Message Button */}
-                <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px", alignItems: "flex-end" }}>
+                <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
                   <button
-                    style={{
-                      padding: "10px",
-                      width: "120px",
-                      borderRadius: "8px",
-                      border: "none",
-                      background: "#4b6cb7",
-                      color: "#fff",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                      transition: "0.3s",
-                      marginTop: "185px"
-                    }}
+                    style={{ padding: "10px", width: "120px", borderRadius: "8px", border: "none", background: "#4b6cb7", color: "#fff", cursor: "pointer", fontWeight: "bold" }}
                     onClick={() => setTeacherChatOpen(true)}
                   >
                     Message
@@ -349,7 +339,7 @@ function TeachersPage() {
         )}
       </div>
 
-      {/* MINI POPUP CHAT */}
+      {/* ---------------- MINI POPUP CHAT ---------------- */}
       {teacherChatOpen && selectedTeacher && (
         <div style={{
           position: "fixed",
@@ -360,14 +350,12 @@ function TeachersPage() {
           borderRadius: "12px",
           boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
           padding: "15px",
-          zIndex: 999,
-          animation: "fadeIn 0.3s ease"
+          zIndex: 999
         }}>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #ddd", paddingBottom: "10px" }}>
             <strong>{selectedTeacher.name}</strong>
             <div style={{ display: "flex", gap: "10px" }}>
-              {/* EXPAND BUTTON: Redirect to AllChat with selected teacher */}
               <button
                 onClick={() => {
                   setTeacherChatOpen(false);
@@ -375,9 +363,8 @@ function TeachersPage() {
                 }}
                 style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer" }}
               >
-                <img width="30" height="30" src="https://img.icons8.com/ios-glyphs/30/expand--v1.png" alt="expand" />
+                ↗
               </button>
-
               <button
                 onClick={() => setTeacherChatOpen(false)}
                 style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}
@@ -393,12 +380,12 @@ function TeachersPage() {
               <p style={{ color: "#aaa", textAlign: "center" }}>Start a conversation with {selectedTeacher.name}...</p>
             ) : (
               popupMessages.map((m, i) => (
-                <div key={i} style={{ marginBottom: "8px", textAlign: m.adminId === admin.adminId ? "right" : "left" }}>
+                <div key={i} style={{ marginBottom: "8px", textAlign: m.sender === "admin" ? "right" : "left" }}>
                   <span style={{
                     padding: "8px 12px",
                     borderRadius: "10px",
-                    background: m.adminId === admin.adminId ? "#4b6cb7" : "#eee",
-                    color: m.adminId === admin.adminId ? "#fff" : "#000",
+                    background: m.sender === "admin" ? "#4b6cb7" : "#eee",
+                    color: m.sender === "admin" ? "#fff" : "#000",
                     display: "inline-block",
                     maxWidth: "80%"
                   }}>{m.text}</span>
@@ -416,7 +403,12 @@ function TeachersPage() {
               placeholder="Type a message..."
               style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid #ccc" }}
             />
-            <button onClick={sendPopupMessage} style={{ background: "#4b6cb7", padding: "10px 15px", color: "#fff", borderRadius: "8px", border: "none", cursor: "pointer" }}>Send</button>
+            <button
+              onClick={sendPopupMessage}
+              style={{ background: "#4b6cb7", padding: "10px 15px", color: "#fff", borderRadius: "8px", border: "none", cursor: "pointer" }}
+            >
+              Send
+            </button>
           </div>
         </div>
       )}
