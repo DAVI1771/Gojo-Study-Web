@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell, FaUsers, FaClipboardCheck } from "react-icons/fa";
 import "../styles/global.css";
 
 const StudentItem = ({ student, selected, onClick }) => (
@@ -246,10 +246,21 @@ function StudentsPage() {
           )}
 
           <div className="sidebar-menu">
-            <Link className="sidebar-btn" to="/dashboard"><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
-            <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
-            <Link className="sidebar-btn" to="/students" style={{ background: "#4b6cb7", color: "#fff" }}><FaChalkboardTeacher /> Students</Link>
+             <Link className="sidebar-btn" to="/dashboard" ><FaHome /> Home</Link>
+           
+            
+            <Link className="sidebar-btn" to="/students" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaUsers /> Students</Link>
+              <Link className="sidebar-btn" to="/admins" ><FaUsers /> Admins</Link>
+            <Link
+                     className="sidebar-btn"
+                     to="/marks"
+                     
+                   ><FaClipboardCheck />
+                     Marks
+                   </Link>
+                   <Link to="/attendance" className="sidebar-btn">
+                                                        <FaUsers /> Attendance
+                                                      </Link>
             <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
             <Link className="sidebar-btn" to="/logout"><FaSignOutAlt /> Logout</Link>
           </div>

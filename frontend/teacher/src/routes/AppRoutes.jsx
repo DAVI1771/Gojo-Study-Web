@@ -8,23 +8,25 @@ import Students from "../components/Students";
 import Marks from "../components/MarksPage";
 import Attendance from "../components/AttendancePage";
 import TeacherChatPage from "../components/TeacherChatPage"; // ✅ NEW
+import AdminPage from "../components/AdminPage"; // ✅ NEW
 
 export default function AppRoutes() {
   return (
     <Router>
       <Routes>
+        {/* Auth */}
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
+        {/* Dashboard & Pages */}
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/students" element={<Students />} />
+        <Route path="/admins" element={<AdminPage />} /> {/* ✅ Admin Page */}
         <Route path="/marks" element={<Marks />} />
-
-        {/* ✅ Attendance Route */}
         <Route path="/attendance" element={<Attendance />} />
 
-        {/* ✅ Teacher Chat Route */}
+        {/* Chat */}
         <Route path="/teacher-chat" element={<TeacherChatPage />} />
       </Routes>
     </Router>

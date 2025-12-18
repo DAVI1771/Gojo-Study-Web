@@ -77,6 +77,7 @@ export default function Dashboard() {
            
             
             <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
+              <Link className="sidebar-btn" to="/admins" ><FaUsers /> Admins</Link>
             <Link
                      className="sidebar-btn"
                      to="/marks"

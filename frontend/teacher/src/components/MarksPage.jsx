@@ -177,18 +177,29 @@ function MarksPage() {
           </div>
         )}
         <div className="sidebar-menu">
-          <Link className="sidebar-btn" to="/dashboard"><FaHome /> Home</Link>
-          <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
-          <Link className="sidebar-btn" to="/marks" style={{ background: "#4b6cb7", color: "#fff" }}><FaClipboardCheck /> Marks</Link>
-          <Link className="sidebar-btn" to="/attendance"><FaUsers /> Attendance</Link>
-          <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
+        <Link className="sidebar-btn" to="/dashboard" ><FaHome /> Home</Link>
+                   
+                    
+                    <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
+                      <Link className="sidebar-btn" to="/admins" ><FaUsers /> Admins</Link>
+                    <Link
+                             className="sidebar-btn"
+                             to="/marks" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}
+                             
+                           ><FaClipboardCheck />
+                             Marks
+                           </Link>
+                           <Link to="/attendance" className="sidebar-btn">
+                                                                <FaUsers /> Attendance
+                                                              </Link>
+                    <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
           <Link className="sidebar-btn" to="/logout"><FaSignOutAlt /> Logout</Link>
         </div>
       </div>
 
       {/* MAIN CONTENT */}
       <div style={{ marginLeft: "300px", marginRight: "250px", paddingTop: "80px", display: "flex", justifyContent: "center", width: "100%" }}>
-        <div style={{ width: "700px" }}>
+        <div style={{ width: "900px" }}>
           {/* COURSE SELECT */}
           <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} style={{ padding: "10px", borderRadius: "10px", marginBottom: "20px", border: "1px solid #ddd", width: "100%" }}>
             <option value="">Select Course</option>
@@ -216,7 +227,26 @@ function MarksPage() {
                   const gradeColor = grade === "A" || grade === "B" ? "#22c55e" : grade === "C" ? "#facc15" : grade ? "#ef4444" : "#999";
                   return (
                     <tr key={s.userId} style={{ borderBottom: "1px solid #eee", cursor: "pointer" }} onClick={() => setSelectedStudent(s)}>
-                      <td style={tdStyle}>{s.name}</td>
+                  <td style={{ ...tdStyle, display: "flex", alignItems: "center", gap: "10px" }}>
+  <div
+    style={{
+      width: "35px",
+      height: "35px",
+      borderRadius: "50%",
+      border: "2px solid #e61d03", // red border
+      overflow: "hidden"
+    }}
+  >
+    <img
+      src={s.profileImage || "/default-profile.png"}
+      alt={s.name}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+    />
+  </div>
+  <span>{s.name}</span>
+</td>
+
+
                       <td style={tdStyle}><input type="number" min="0" max="20" value={marks[s.userId]?.mark20 || ""} onChange={e => handleMarkChange(s.userId, "mark20", e.target.value)} style={inputStyle} /></td>
                       <td style={tdStyle}><input type="number" min="0" max="30" value={marks[s.userId]?.mark30 || ""} onChange={e => handleMarkChange(s.userId, "mark30", e.target.value)} style={inputStyle} /></td>
                       <td style={tdStyle}><input type="number" min="0" max="50" value={marks[s.userId]?.mark50 || ""} onChange={e => handleMarkChange(s.userId, "mark50", e.target.value)} style={inputStyle} /></td>
