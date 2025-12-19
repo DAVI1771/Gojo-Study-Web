@@ -21,6 +21,12 @@ function TeachersPage() {
   const [popupMessages, setPopupMessages] = useState([]);
   const [popupInput, setPopupInput] = useState("");
 
+
+  const [showMessageDropdown, setShowMessageDropdown] = useState(false);
+
+  const [unreadTeachers, setUnreadTeachers] = useState({});
+
+
   const navigate = useNavigate();
  const admin = JSON.parse(localStorage.getItem("admin")) || {};
 const adminUserId = admin.userId;   // ✅ now it exists
@@ -83,6 +89,48 @@ const adminUserId = admin.userId;   // ✅ now it exists
       ? teachers
       : teachers.filter(t => t.gradesSubjects.some(gs => gs.grade === selectedGrade));
 
+
+
+
+
+
+
+
+
+
+//----------------------Fetch unread messages for teachers--------------------
+
+      useEffect(() => {
+  if (!adminUserId || teachers.length === 0) return;
+
+  const fetchUnreadTeachers = async () => {
+    const unread = {};
+
+    for (const t of teachers) {
+      const chatKey = `${adminUserId}_${t.userId}`;
+      try {
+        const res = await axios.get(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+        );
+
+        const msgs = Object.values(res.data || {});
+        const count = msgs.filter(
+          m => m.receiverId === adminUserId && m.seen === false
+        ).length;
+
+        if (count > 0) unread[t.userId] = count;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    setUnreadTeachers(unread);
+  };
+
+  fetchUnreadTeachers();
+}, [teachers, adminUserId]);
+
+
   // ---------------- FETCH CHAT MESSAGES ----------------
 useEffect(() => {
   if (!teacherChatOpen || !selectedTeacher) return;
@@ -90,7 +138,7 @@ useEffect(() => {
   const fetchMessages = async () => {
     try {
       // Always use teacherUserId_adminUserId
-      const chatKey = `${selectedTeacher.userId}_${adminUserId}`;
+      const chatKey = `${adminUserId}_${selectedTeacher.userId}`;
 
       const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
 
@@ -122,7 +170,7 @@ const sendPopupMessage = async () => {
 
   try {
     // Always use teacherUserId_adminUserId
-    const chatKey = `${selectedTeacher.userId}_${adminUserId}`;
+    const chatKey =  `${adminUserId}_${selectedTeacher.userId}`;
     const url = `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`;
 
     await axios.post(url, newMessage);
@@ -136,22 +184,153 @@ const sendPopupMessage = async () => {
 
 
 
+// ---------------- MARK MESSAGES AS SEEN ----------------
+
+
+useEffect(() => {
+  if (!teacherChatOpen || !selectedTeacher) return;
+
+  const markMessagesAsSeen = async () => {
+    const chatKey = `${adminUserId}_${selectedTeacher.userId}`;
+    try {
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+      );
+      const msgs = Object.entries(res.data || {});
+      const updates = {};
+      msgs.forEach(([key, msg]) => {
+        if (msg.receiverId === adminUserId && !msg.seen) updates[key + "/seen"] = true;
+      });
+
+      if (Object.keys(updates).length > 0) {
+        await axios.patch(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+          updates
+        );
+        // remove badge
+        setUnreadTeachers(prev => ({ ...prev, [selectedTeacher.userId]: 0 }));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  markMessagesAsSeen();
+}, [teacherChatOpen, selectedTeacher, adminUserId]);
+
+
+
+
+
+
+
+
+
+
+
   return (
     <div className="dashboard-page">
       {/* ---------------- TOP NAVBAR ---------------- */}
       <nav className="top-navbar">
-        <h2>Gojo Dashboard</h2>
-        <div className="nav-search">
-          <FaSearch className="search-icon" />
-          <input type="text" placeholder="Search Teacher and Student..." />
-        </div>
-        <div className="nav-right">
-          <div className="icon-circle"><FaBell /></div>
-          <div className="icon-circle"><FaFacebookMessenger /></div>
-          <div className="icon-circle"><FaCog /></div>
-          <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
-        </div>
-      </nav>
+  <h2>Gojo Dashboard</h2>
+  <div className="nav-search">
+    <FaSearch className="search-icon" />
+    <input type="text" placeholder="Search Teacher and Student..." />
+  </div>
+  <div className="nav-right">
+    <div className="icon-circle"><FaBell /></div>
+
+    {/* ---------- MESSAGE ICON WITH TOTAL UNREAD ---------- */}
+   <div 
+  className="icon-circle" 
+  style={{ position: "relative", cursor: "pointer" }}
+  onClick={() => setShowMessageDropdown(prev => !prev)}
+>
+  <FaFacebookMessenger />
+  {Object.values(unreadTeachers).reduce((a, b) => a + b, 0) > 0 && (
+    <span style={{
+      position: "absolute",
+      top: "-5px",
+      right: "-5px",
+      background: "red",
+      color: "#fff",
+      borderRadius: "50%",
+      padding: "2px 6px",
+      fontSize: "10px",
+      fontWeight: "bold"
+    }}>
+      {Object.values(unreadTeachers).reduce((a, b) => a + b, 0)}
+    </span>
+  )}
+
+  {/* ---------- DROPDOWN ---------- */}
+  {showMessageDropdown && (
+    <div style={{
+      position: "absolute",
+      top: "35px",
+      right: "0",
+      width: "300px",
+      maxHeight: "400px",
+      overflowY: "auto",
+      background: "#fff",
+      border: "1px solid #ddd",
+      borderRadius: "8px",
+      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+      zIndex: 1000
+    }}>
+      {teachers
+        .filter(t => unreadTeachers[t.userId] > 0)
+        .map(t => {
+          const msgs = popupMessages
+            .filter(m => m.senderId === t.userId && !m.seen)
+            .sort((a, b) => a.timeStamp - b.timeStamp);
+          const latestMsg = msgs[msgs.length - 1];
+
+          return (
+            <div
+              key={t.userId}
+              style={{
+                padding: "10px",
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                alignItems: "center",
+                cursor: "default", // no pointer effect
+                background: "#f9f9f9"
+              }}
+            >
+              <img 
+                src={t.profileImage} 
+                alt={t.name} 
+                style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} 
+              />
+              <div style={{ flex: 1 }}>
+                <strong>{t.name}</strong>
+                <p style={{ margin: 0, fontSize: "12px", color: "#555" }}>
+                  {latestMsg?.text || "New message"}
+                </p>
+              </div>
+              {latestMsg && (
+                <span style={{ fontSize: "10px", color: "#888", marginLeft: "5px" }}>
+                  {new Date(latestMsg.timeStamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) === 0 && (
+        <p style={{ textAlign: "center", padding: "10px", color: "#777" }}>No new messages</p>
+      )}
+    </div>
+  )}
+</div>
+
+
+
+    <div className="icon-circle"><FaCog /></div>
+    <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
+  </div>
+</nav>
+
 
       <div className="google-dashboard" style={{ display: "flex" }}>
         {/* ---------------- SIDEBAR ---------------- */}
@@ -245,7 +424,23 @@ const sendPopupMessage = async () => {
                       }}
                     />
                     <h3>{t.name}</h3>
-                  </div>
+
+
+                      {/* ---------- UNREAD BADGE ---------- */}
+  {unreadTeachers[t.userId] > 0 && (
+  <span style={{
+    marginLeft: "250px",
+    background: "red",
+    color: "#fff",
+    borderRadius: "50%",
+    padding: "4px 8px",
+    fontSize: "12px"
+  }}>
+    {unreadTeachers[t.userId]}
+  </span>
+)}
+    
+</div>
                   <div style={{ marginLeft: "70px", marginTop: "-25px", color: "#555" }}>
                     {t.gradesSubjects.length > 0 ? t.gradesSubjects.map(gs => gs.subject).join(", ") : "No assigned courses"}
                   </div>

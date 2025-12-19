@@ -18,6 +18,10 @@ function StudentsPage() {
   const [popupMessages, setPopupMessages] = useState([]); // Messages for chat popup
   const [popupInput, setPopupInput] = useState(""); // Input for chat message
 
+
+
+  const [unreadMap, setUnreadMap] = useState({});
+
   const navigate = useNavigate();
   const admin = JSON.parse(localStorage.getItem("admin")) || {}; // Admin info from localStorage
 
@@ -73,20 +77,64 @@ function StudentsPage() {
     return true;
   });
 
- // ------------------ FETCH MESSAGES ------------------
+
+
+
+
+//-------------------------Fetch unread status for each student--------------
+
   useEffect(() => {
+  const fetchUnread = async () => {
+    const map = {};
+
+    for (const s of students) {
+      const key = `${s.userId}_${admin.userId}`;
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
+      );
+
+      const msgs = res.data || {};
+      map[s.userId] = Object.values(msgs).some(
+        m => m.senderId === s.userId && m.seenByAdmin === false
+      );
+    }
+
+    setUnreadMap(map);
+  };
+
+  if (students.length > 0) fetchUnread();
+}, [students]);
+
+
+ // ------------------ FETCH MESSAGES ------------------
+ useEffect(() => {
   if (studentChatOpen && selectedStudent) {
     const key = `${selectedStudent.userId}_${admin.userId}`;
+
     const fetchMessages = async () => {
-      try {
-        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`);
-        const messagesData = res.data || {};
-        const messagesList = Object.keys(messagesData).map(id => messagesData[id]);
-        setPopupMessages(messagesList);
-      } catch (err) {
-        console.error("Error fetching messages:", err);
-      }
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
+      );
+
+      const data = res.data || {};
+      const messages = Object.entries(data);
+
+      setPopupMessages(messages.map(([id, msg]) => ({ id, ...msg })));
+
+      // 🔥 MARK STUDENT MESSAGES AS SEEN
+      messages.forEach(([id, msg]) => {
+        if (
+          msg.senderId === selectedStudent.userId &&
+          msg.seenByAdmin === false
+        ) {
+          axios.patch(
+            `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages/${id}.json`,
+            { seenByAdmin: true }
+          );
+        }
+      });
     };
+
     fetchMessages();
   }
 }, [studentChatOpen, selectedStudent]);
@@ -230,7 +278,21 @@ function StudentsPage() {
                     transition: "all 0.3s ease"
                   }} />
                   <div>
-                    <h3 style={{ margin: 0 }}>{s.name}</h3>
+                    <h3 style={{ margin: 0 }}>{s.name}
+
+                        {unreadMap[s.userId] && (
+    <span
+      style={{
+        width: "10px",
+        height: "10px",
+        background: "red",
+        borderRadius: "50%",
+        display: "inline-block"
+      }}
+    />
+  )}
+  
+                    </h3>
                     <p style={{ margin: "4px 0", color: "#555" }}>Grade {s.grade} - Section {s.section}</p>
                   </div>
                 </div>
