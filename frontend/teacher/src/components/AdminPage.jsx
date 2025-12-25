@@ -116,8 +116,8 @@ function AdminPage() {
       try {
         const key =
           teacherInfo.userId < selectedAdmin.adminId
-            ? `${selectedAdmin.adminId}_${teacherInfo.userId}`
-            : `${selectedAdmin.adminId}_${teacherInfo.userId}`;
+            ? `${teacherInfo.userId}_${selectedAdmin.adminId}`
+            : `${teacherInfo.userId}_${selectedAdmin.adminId}`;
 
         const res = await axios.get(
           `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
@@ -155,8 +155,8 @@ function AdminPage() {
     try {
       const key =
         teacherInfo.userId < selectedAdmin.adminId
-          ? `${selectedAdmin.adminId}_${teacherInfo.userId}`
-          : `${selectedAdmin.adminId}_${teacherInfo.userId}`;
+            ? `${teacherInfo.userId}_${selectedAdmin.adminId}`
+            : `${teacherInfo.userId}_${selectedAdmin.adminId}`;
 
       await axios.post(
         `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`,
