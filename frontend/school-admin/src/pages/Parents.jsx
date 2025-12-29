@@ -16,8 +16,10 @@ function Parent() {
   const [expandedChildren, setExpandedChildren] = useState({});
   // At the top of your Parent component
   const [expanded, setExpanded] = useState(false);
+const [unreadSenders, setUnreadSenders] = useState([]); 
+const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 
-
+ const [messageDropdownVisible, setMessageDropdownVisible] = useState(false);
   const navigate = useNavigate();
   const admin = JSON.parse(localStorage.getItem("admin")) || {};
 
@@ -41,6 +43,23 @@ function Parent() {
       }
     };
     fetchParents();
+  }, []);
+ const toggleDropdown = () => {
+    setShowMessageDropdown(prev => !prev);
+  };
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+
+  useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
   }, []);
 
   // Fetch parent info & children for selected parent
@@ -128,8 +147,149 @@ function Parent() {
 }, [selectedParent]);
 
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
 
 
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
+
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
+useEffect(() => {
+    const closeDropdown = (e) => {
+      // Optionally check if click is outside
+      setShowMessageDropdown(false);
+    };
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
 
   // Fetch chat messages
   useEffect(() => {
@@ -183,8 +343,112 @@ function Parent() {
         </div>
         <div className="nav-right">
           <div className="icon-circle"><FaBell /></div>
-          <div className="icon-circle"><FaFacebookMessenger /></div>
-          <div className="icon-circle"><FaCog /></div>
+
+
+
+          {/* ================= MESSENGER ================= */}
+          <div
+            className="icon-circle"
+            style={{ position: "relative", cursor: "pointer" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMessageDropdown((prev) => !prev);
+            }}
+          >
+            <FaFacebookMessenger />
+          
+            {/* 🔴 TOTAL UNREAD COUNT */}
+            {Object.keys(unreadSenders).length > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-5px",
+                  right: "-5px",
+                  background: "red",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  padding: "2px 6px",
+                  fontSize: "10px",
+                  fontWeight: "bold"
+                }}
+              >
+                {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+              </span>
+            )}
+          
+            {/* 📩 DROPDOWN */}
+            {showMessageDropdown && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "40px",
+                  right: "0",
+                  width: "300px",
+                  background: "#fff",
+                  borderRadius: "10px",
+                  boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+                  zIndex: 1000
+                }}
+              >
+                {Object.keys(unreadSenders).length === 0 ? (
+                  <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+                    No new messages
+                  </p>
+                ) : (
+                  Object.entries(unreadSenders).map(([userId, sender]) => (
+                    <div
+                      key={userId}
+                      style={{
+                        padding: "12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                        borderBottom: "1px solid #eee"
+                      }}
+                     onClick={() => {
+            setShowMessageDropdown(false);
+          
+            // Build full user object expected by AllChat
+            const user = {
+              userId,
+              name: sender.name,
+              profileImage: sender.profileImage
+            };
+          
+            navigate("/all-chat", {
+              state: { user }
+            });
+          }}
+          
+          
+                    >
+                      <img
+                        src={sender.profileImage}
+                        alt={sender.name}
+                        style={{
+                          width: "42px",
+                          height: "42px",
+                          borderRadius: "50%"
+                        }}
+                      />
+                      <div>
+                        <strong>{sender.name}</strong>
+                        <p style={{ fontSize: "12px", margin: 0 }}>
+                          {sender.count} new message{sender.count > 1 && "s"}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          {/* ============== END MESSENGER ============== */}
+          
+           <Link className="icon-circle" to="/settings">
+                 <FaCog />
+               </Link>
           <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
         </div>
       </nav>
@@ -206,7 +470,7 @@ function Parent() {
             <Link className="sidebar-btn" to="/students"><FaChalkboardTeacher /> Students</Link>
             <Link className="sidebar-btn" to="/schedule"><FaCalendarAlt /> Schedule</Link>
             <Link className="sidebar-btn" to="/parents" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaChalkboardTeacher /> Parents</Link>
-            <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
+        
             <button className="sidebar-btn logout-btn" onClick={() => { localStorage.removeItem("admin"); window.location.href = "/login"; }}>
               <FaSignOutAlt /> Logout
             </button>
@@ -332,111 +596,170 @@ function Parent() {
           const isExpanded = expandedChildren[child.studentId] || false;
 
           return (
-            <div 
-              key={child.studentId}
-              style={{
-                background: "#ffffff",
-                borderRadius: "18px",
-                padding: "25px",
-                boxShadow: "0 15px 30px rgba(0,0,0,0.08)",
-                transition: "all 0.3s ease",
-                cursor: "pointer",
-                position: "relative",
-                overflow: "hidden",
-                borderTop: "6px solid #4b6cb7",
-              }}
-            >
-              {/* Profile Image */}
-              <img 
-                src={child.profileImage || "/default-profile.png"} 
-                alt={child.name} 
-                style={{ 
-                  width: "90px", 
-                  height: "90px", 
-                  borderRadius: "50%", 
-                  objectFit: "cover", 
-                  border: "3px solid #4b6cb7", 
-                  marginBottom: "15px",
-                  display: "block",
-                  marginLeft: "auto",
-                  marginRight: "auto"
-                }} 
-              />
+            <div
+  key={child.studentId}
+  style={{
+    background: "#ffffff",
+    borderRadius: "16px",
+    padding: "20px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+    transition: "0.3s",
+    borderLeft: "6px solid #4b6cb7"
+  }}
+>
+  {/* HEADER – IMAGE + NAME (HORIZONTAL) */}
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "16px",
+      marginBottom: "16px"
+    }}
+  >
+    <img
+      src={child.profileImage || "/default-profile.png"}
+      alt={child.name}
+      style={{
+        width: "64px",
+        height: "64px",
+        borderRadius: "50%",
+        objectFit: "cover",
+        border: "2px solid #4b6cb7"
+      }}
+    />
 
-              {/* Name */}
-              <h3 style={{ 
-                margin: "12px 0", 
-                fontSize: "20px", 
-                fontWeight: "600", 
-                textAlign: "center" 
-              }}>
-                {child.name}
-              </h3>
+    <div style={{ flex: 1 }}>
+      <h3
+        style={{
+          margin: 0,
+          fontSize: "18px",
+          fontWeight: "600",
+          color: "#1f2937"
+        }}
+      >
+        {child.name}
+      </h3>
 
-              {/* Badges */}
-              <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", marginBottom: "15px" }}>
-                <span style={{ background: "#4b6cb7", color: "#fff", padding: "5px 10px", borderRadius: "10px", fontSize: "12px", fontWeight: "500" }}>
-                  Grade {child.grade}
-                </span>
-                <span style={{ background: "#ff7e5f", color: "#fff", padding: "5px 10px", borderRadius: "10px", fontSize: "12px", fontWeight: "500" }}>
-                  Section {child.section}
-                </span>
-              </div>
+      <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+        <span
+          style={{
+            background: "#eef2ff",
+            color: "#4b6cb7",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "600"
+          }}
+        >
+          Grade {child.grade}
+        </span>
 
-              {/* Toggle Details Button */}
-              <div style={{ textAlign: "center", marginBottom: "12px" }}>
-                <button
-                  onClick={() => setExpandedChildren(prev => ({
-                    ...prev,
-                    [child.studentId]: !prev[child.studentId]
-                  }))}
-                  style={{
-                    padding: "7px 15px",
-                    borderRadius: "12px",
-                    border: "none",
-                    background: isExpanded ? "#182848" : "#4b6cb7",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                    transition: "all 0.2s",
-                  }}
-                >
-                  {isExpanded ? "Hide Details" : "Show Details"}
-                </button>
-              </div>
+        <span
+          style={{
+            background: "#f1f5f9",
+            color: "#334155",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "600"
+          }}
+        >
+          Section {child.section}
+        </span>
+      </div>
+    </div>
 
-              {/* Expanded Info */}
-              {isExpanded && (
-                <div style={{ fontSize: "14px", color: "#555", lineHeight: "1.6", textAlign: "center", marginTop: "10px" }}>
-                  <p>Email: <a href={`mailto:${child.email}`} style={{ color: "#4b6cb7", textDecoration: "none" }}>{child.email}</a></p>
-                  <p>Parent Phone: <a href={`tel:${child.parentPhone}`} style={{ color: "#34a853", textDecoration: "none" }}>{child.parentPhone}</a></p>
-                  <p>Relationship: {child.relationship}</p>
-                </div>
-              )}
+    {/* TOGGLE BUTTON */}
+    <button
+      onClick={() =>
+        setExpandedChildren(prev => ({
+          ...prev,
+          [child.studentId]: !expandedChildren[child.studentId]
+        }))
+      }
+      style={{
+        padding: "8px 14px",
+        borderRadius: "10px",
+        border: "none",
+        background: expandedChildren[child.studentId] ? "#1e293b" : "#4b6cb7",
+        color: "#fff",
+        cursor: "pointer",
+        fontSize: "13px",
+        fontWeight: "600"
+      }}
+    >
+      {expandedChildren[child.studentId] ? "Hide" : "Details"}
+    </button>
+  </div>
 
-              {/* Action Buttons */}
-              {isExpanded && (
-                <div style={{ display: "flex", justifyContent: "center", gap: "12px", marginTop: "15px" }}>
-                  <a 
-                    href={`mailto:${child.email}`} 
-                    style={{ padding: "8px 18px", background: "#4b6cb7", color: "#fff", borderRadius: "12px", textDecoration: "none", fontSize: "14px", fontWeight: "600", transition: "all 0.2s" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#182848"}
-                    onMouseLeave={e => e.currentTarget.style.background = "#4b6cb7"}
-                  >
-                    Email
-                  </a>
-                  <a 
-                    href={`tel:${child.parentPhone}`} 
-                    style={{ padding: "8px 18px", background: "#34a853", color: "#fff", borderRadius: "12px", textDecoration: "none", fontSize: "14px", fontWeight: "600", transition: "all 0.2s" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#0f592a"}
-                    onMouseLeave={e => e.currentTarget.style.background = "#34a853"}
-                  >
-                    Call
-                  </a>
-                </div>
-              )}
-            </div>
+  {/* EXPANDED DETAILS */}
+  {expandedChildren[child.studentId] && (
+    <>
+      <div
+        style={{
+          borderTop: "1px solid #e5e7eb",
+          paddingTop: "12px",
+          fontSize: "14px",
+          color: "#475569",
+          lineHeight: "1.7"
+        }}
+      >
+        <p>
+          <strong>Email:</strong>{" "}
+          <a href={`mailto:${child.email}`} style={{ color: "#4b6cb7" }}>
+            {child.email}
+          </a>
+        </p>
+        <p>
+          <strong>Parent Phone:</strong>{" "}
+          <a href={`tel:${child.parentPhone}`} style={{ color: "#16a34a" }}>
+            {child.parentPhone}
+          </a>
+        </p>
+        <p>
+          <strong>Relationship:</strong> {child.relationship}
+        </p>
+      </div>
+
+      {/* ACTIONS */}
+      <div style={{ display: "flex", gap: "12px", marginTop: "14px" }}>
+        <a
+          href={`mailto:${child.email}`}
+          style={{
+            flex: 1,
+            textAlign: "center",
+            padding: "8px",
+            background: "#4b6cb7",
+            color: "#fff",
+            borderRadius: "10px",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: "600"
+          }}
+        >
+          Email
+        </a>
+        <a
+          href={`tel:${child.parentPhone}`}
+          style={{
+            flex: 1,
+            textAlign: "center",
+            padding: "8px",
+            background: "#16a34a",
+            color: "#fff",
+            borderRadius: "10px",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: "600"
+          }}
+        >
+          Call
+        </a>
+      </div>
+    </>
+  )}
+</div>
+
           );
         })}
       </div>

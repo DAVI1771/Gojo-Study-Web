@@ -79,7 +79,7 @@
 /* Sidebar container */
 /* Sidebar container */
 .google-sidebar {
-  width: 300px; /* increased width */
+  width: 400px; /* increased width */
   height: 100vh; /* taller sidebar */
   padding: 80px 20px; /* more padding */
   background: #fff;
@@ -140,6 +140,8 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  height: 80%; /* take more vertical space */
+  justify-content: center;
 }
 
 .sidebar-btn {

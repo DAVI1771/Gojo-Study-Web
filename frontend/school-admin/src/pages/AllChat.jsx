@@ -4,6 +4,9 @@ import { FaArrowLeft, FaPaperPlane, FaTrash, FaEdit, FaSearch } from "react-icon
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, push, update, set } from "firebase/database";
 import "../styles/global.css"; // we will add CSS animations here
+import axios from "axios";
+
+
 
 // ------------------- Firebase Config -------------------
 const firebaseConfig = {
@@ -22,7 +25,7 @@ const db = getDatabase(app);
 function AllChat() {
   const location = useLocation();
   const navigate = useNavigate();
-  const selectedUser = location.state?.user || null;
+  
 
   const [popupMessages, setPopupMessages] = useState([]);
   const [popupInput, setPopupInput] = useState("");
@@ -30,23 +33,51 @@ function AllChat() {
   const [students, setStudents] = useState([]);
   const [parents, setParents] = useState([]);
   const [selectedTab, setSelectedTab] = useState("teacher");
-  const [selectedChatUser, setSelectedChatUser] = useState(selectedUser);
+ 
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [typing, setTyping] = useState(false);
   const [lastSeen, setLastSeen] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  const { userId, userType, name, profileImage } = location.state || {};
   const admin = JSON.parse(localStorage.getItem("admin")) || {};
   const adminUserId = admin.userId;
+
+// If a user is passed from Dashboard, open their chat. Otherwise, default to first teacher/student/parent
+const passedUser = location.state?.user || null;
+const [selectedChatUser, setSelectedChatUser] = useState(passedUser);
+
+useEffect(() => {
+  if (!selectedChatUser) {
+    const firstUser = (teachers[0] || students[0] || parents[0]) || null;
+    setSelectedChatUser(firstUser);
+  }
+}, [teachers, students, parents]);
+
+
 
   const chatEndRef = useRef(null);
   const typingRef = useRef(null);
   const messageRefs = useRef({});
 
+useEffect(() => {
+  if (!selectedChatUser || !adminUserId) return;
 
-  
+  const fetchMessages = async () => {
+    try {
+      const chatKey = `${selectedChatUser.userId}_${adminUserId}`;
+      const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+      setPopupMessages(Object.values(res.data || {}));
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
+  fetchMessages();
+}, [selectedChatUser, adminUserId]);
+
+   
   // ------------------- Fetch users -------------------
   useEffect(() => {
     const fetchUsers = async () => {
@@ -90,6 +121,8 @@ function AllChat() {
     };
     fetchUsers();
   }, [adminUserId]);
+
+
 
   // ------------------- Real-time messages -------------------
   useEffect(() => {
@@ -178,6 +211,15 @@ function AllChat() {
       await set(typingStatusRef, { userId: null });
     }, 2000);
   };
+
+
+  useEffect(() => {
+  if (!userId || !adminUserId) return;
+
+  axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${adminUserId}_${userId}/messages.json`)
+    .then(res => setPopupMessages(Object.values(res.data || {})));
+}, [userId, adminUserId]);
+
 
   // ------------------- Scroll to bottom -------------------
   useEffect(() => {

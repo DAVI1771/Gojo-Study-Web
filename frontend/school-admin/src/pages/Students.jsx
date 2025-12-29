@@ -7,6 +7,9 @@ import {
 import axios from "axios";
 import { format, parseISO, startOfWeek, startOfMonth } from "date-fns";
 import { useMemo } from "react";
+import { getDatabase, ref, onValue, push, update } from "firebase/database";
+import { getFirestore, collection, getDocs } from "firebase/firestore";
+import { app } from "../firebaseConfig"; // your firebase config file
 
 
 function StudentsPage() {
@@ -33,13 +36,41 @@ function StudentsPage() {
 
   const [teachers, setTeachers] = useState([]);
 const [unreadTeachers, setUnreadTeachers] = useState({});
-
+const [unreadSenders, setUnreadSenders] = useState([]); 
 const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
 
+
+
 const adminUserId = admin.userId;
 
+const db = getDatabase(app);
+
+useEffect(() => {
+  const fetchStudents = async () => {
+    const querySnapshot = await getDocs(collection(db, "students"));
+    const studentsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setStudents(studentsData);
+  };
+
+  fetchStudents();
+}, []);
+
+
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
 
 const handleSelectStudent = async (s) => {
   setLoading(true);
@@ -253,15 +284,17 @@ useEffect(() => {
     const map = {};
 
     for (const s of students) {
-      const key = `${s.userId}_${admin.userId}`;
+      const key = `${s.studentId}_${admin.userId}`;
+
       const res = await axios.get(
         `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
       );
 
       const msgs = res.data || {};
-      map[s.userId] = Object.values(msgs).some(
-        m => m.senderId === s.userId && m.seenByAdmin === false
-      );
+   map[s.studentId] = Object.values(msgs).some(
+  m => m.senderId === s.studentId && m.seenByAdmin === false
+);
+
     }
 
     setUnreadMap(map);
@@ -270,63 +303,210 @@ useEffect(() => {
   if (students.length > 0) fetchUnread();
 }, [students]);
 
-// ------------------ FETCH MESSAGES ------------------
-useEffect(() => {
-  if (studentChatOpen && selectedStudent) {
-    const key = `${selectedStudent.studentId}_${admin.userId}`;
+// ---------------- FETCH CHAT MESSAGES ----------------
+  useEffect(() => {
+    if (!studentChatOpen || !selectedStudent) return;
 
     const fetchMessages = async () => {
-      const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
-      );
-
-      const data = res.data || {};
-      const messages = Object.entries(data).map(([id, msg]) => ({ id, ...msg }));
-
-      setPopupMessages(messages);
-
-      // MARK STUDENT MESSAGES AS SEEN
-      messages.forEach((msg) => {
-        if (msg.senderId === selectedStudent.studentId && !msg.seenByAdmin) {
-          axios.patch(
-            `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages/${msg.id}.json`,
-            { seenByAdmin: true }
-          );
-        }
-      });
+      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+      try {
+        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+        const msgs = Object.values(res.data || {}).map(m => ({
+          ...m,
+          sender: m.senderId === adminUserId ? "admin" : "student"
+        })).sort((a, b) => a.timeStamp - b.timeStamp);
+        setPopupMessages(msgs);
+      } catch (err) {
+        console.error(err);
+        setPopupMessages([]);
+      }
     };
 
     fetchMessages();
-  }
-}, [studentChatOpen, selectedStudent]);
+  }, [studentChatOpen, selectedStudent, adminUserId]);
 
-// ------------------ SEND MESSAGE ------------------
-const handleSendMessage = async () => {
-  if (!popupInput.trim() || !selectedStudent) return;
-
-  const key = `${selectedStudent.studentId}_${admin.userId}`;
-  const newMessage = {
-    senderId: admin.userId,
-    receiverId: selectedStudent.studentId,
-    content: popupInput,
-    timeStamp: Date.now(),
-    edited: false,
-    seenByAdmin: true
+  // ---------------- SEND MESSAGE ----------------
+  const sendPopupMessage = async () => {
+    if (!popupInput.trim() || !selectedStudent) return;
+    const newMessage = {
+      senderId: adminUserId,
+      receiverId: selectedStudent.userId,
+      text: popupInput,
+      timeStamp: Date.now()
+    };
+    try {
+      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+      await axios.post(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, newMessage);
+      setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+      setPopupInput("");
+    } catch (err) {
+      console.error(err);
+    }
   };
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
   try {
-    const res = await axios.post(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`,
-      newMessage
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
+
+
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
     );
 
-    // Firebase returns name/key of the new message
-    setPopupMessages([...popupMessages, { id: res.data.name, ...newMessage }]);
-    setPopupInput("");
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
   } catch (err) {
-    console.error("Error sending message:", err);
+    console.error("Unread fetch failed:", err);
   }
 };
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
+
+
+  // ---------------- MARK MESSAGES AS SEEN ----------------
+  useEffect(() => {
+    if (!studentChatOpen || !selectedStudent) return;
+
+    const markSeen = async () => {
+      const chatKey = `${adminUserId}_${selectedStudent.userId}`;
+      try {
+        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+        const msgs = Object.entries(res.data || {});
+        const updates = {};
+        msgs.forEach(([key, msg]) => {
+          if (msg.receiverId === adminUserId && !msg.seen) updates[key + "/seen"] = true;
+        });
+        if (Object.keys(updates).length > 0) {
+          await axios.patch(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, updates);
+          setUnreadStudents(prev => ({ ...prev, [selectedStudent.userId]: 0 }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    markSeen();
+  }, [studentChatOpen, selectedStudent, adminUserId]);
+
+
+
 const attendanceStats = useMemo(() => {
   if (!selectedStudent?.attendance) return null;
 
@@ -362,93 +542,110 @@ const attendanceStats = useMemo(() => {
         </div>
         <div className="nav-right">
           <div className="icon-circle"><FaBell /></div>
-          <div 
-  className="icon-circle" 
-  style={{ position: "relative", cursor: "pointer" }}
-  onClick={() => setShowMessageDropdown(prev => !prev)}
->
-  <FaFacebookMessenger />
-  {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) > 0 && (
-    <span style={{
-      position: "absolute",
-      top: "-5px",
-      right: "-5px",
-      background: "red",
-      color: "#fff",
-      borderRadius: "50%",
-      padding: "2px 6px",
-      fontSize: "10px",
-      fontWeight: "bold"
-    }}>
-      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0)}
-    </span>
-  )}
-
-  {showMessageDropdown && (
-    <div style={{
-      position: "absolute",
-      top: "35px",
-      right: "0",
-      width: "300px",
-      maxHeight: "400px",
-      overflowY: "auto",
-      background: "#fff",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      zIndex: 1000
-    }}>
-      {teachers.map(t => {
-        const msgs = popupMessages
-          .filter(m => m.senderId === t.userId || m.receiverId === t.userId)
-          .sort((a,b) => a.timeStamp - b.timeStamp);
-        const latestMsg = msgs[msgs.length - 1];
-
-        return (
-          <div
-            key={t.userId}
-            onClick={() => {
-              setSelectedTeacher(t);
-              setTeacherChatOpen(true);
-              setShowMessageDropdown(false);
-            }}
-            style={{
-              padding: "10px",
-              borderBottom: "1px solid #eee",
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              background: unreadTeachers[t.userId] > 0 ? "#f0f4ff" : "#fff"
-            }}
-          >
-            <img src={t.profileImage} alt={t.name} style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} />
-            <div style={{ flex: 1 }}>
-              <strong>{t.name}</strong>
-              <p style={{ margin:0, fontSize:"12px", color:"#555" }}>{latestMsg?.text || "No messages yet"}</p>
-            </div>
-            {unreadTeachers[t.userId] > 0 && (
-              <span style={{
-                background: "red",
-                color: "#fff",
-                borderRadius: "50%",
-                padding: "2px 6px",
-                fontSize: "10px",
-                marginLeft: "5px"
-              }}>
-                {unreadTeachers[t.userId]}
-              </span>
-            )}
-          </div>
-        )
-      })}
-      {teachers.every(t => !unreadTeachers[t.userId]) && (
-        <p style={{ textAlign: "center", padding: "10px", color:"#777" }}>No new messages</p>
+    {/* ================= MESSENGER ================= */}
+    <div
+      className="icon-circle"
+      style={{ position: "relative", cursor: "pointer" }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowMessageDropdown((prev) => !prev);
+      }}
+    >
+      <FaFacebookMessenger />
+    
+      {/* 🔴 TOTAL UNREAD COUNT */}
+      {Object.keys(unreadSenders).length > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: "-5px",
+            right: "-5px",
+            background: "red",
+            color: "#fff",
+            borderRadius: "50%",
+            padding: "2px 6px",
+            fontSize: "10px",
+            fontWeight: "bold"
+          }}
+        >
+          {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+        </span>
+      )}
+    
+      {/* 📩 DROPDOWN */}
+      {showMessageDropdown && (
+        <div
+          style={{
+            position: "absolute",
+            top: "40px",
+            right: "0",
+            width: "300px",
+            background: "#fff",
+            borderRadius: "10px",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+            zIndex: 1000
+          }}
+        >
+          {Object.keys(unreadSenders).length === 0 ? (
+            <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+              No new messages
+            </p>
+          ) : (
+            Object.entries(unreadSenders).map(([userId, sender]) => (
+              <div
+                key={userId}
+                style={{
+                  padding: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  cursor: "pointer",
+                  borderBottom: "1px solid #eee"
+                }}
+               onClick={() => {
+      setShowMessageDropdown(false);
+    
+      // Build full user object expected by AllChat
+      const user = {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage
+      };
+    
+      navigate("/all-chat", {
+        state: { user }
+      });
+    }}
+    
+    
+              >
+                <img
+                  src={sender.profileImage}
+                  alt={sender.name}
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%"
+                  }}
+                />
+                <div>
+                  <strong>{sender.name}</strong>
+                  <p style={{ fontSize: "12px", margin: 0 }}>
+                    {sender.count} new message{sender.count > 1 && "s"}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
-  )}
-</div>
+    {/* ============== END MESSENGER ============== */}
+    
 
-          <div className="icon-circle"><FaCog /></div>
+           <Link className="icon-circle" to="/settings">
+                           <FaCog />
+                         </Link>
           <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
         </div>
       </nav>
@@ -483,9 +680,7 @@ const attendanceStats = useMemo(() => {
                           <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
                                      </Link>
                                                
-                        <Link className="sidebar-btn" to="/settings" >
-                                     <FaCog /> Settings
-                                   </Link>
+                   
                        <button
                          className="sidebar-btn logout-btn"
                          onClick={() => {
@@ -543,7 +738,7 @@ const attendanceStats = useMemo(() => {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
              {filteredStudents.map(s => (
   <div
-    key={s.studentId}
+    key={s.userId}
     onClick={() => handleSelectStudent(s)}
     style={{
       width: "500px",
@@ -1140,18 +1335,22 @@ const attendanceStats = useMemo(() => {
       <strong>{selectedStudent.name}</strong>
       <div style={{ display: "flex", gap: "10px" }}>
         {/* Expand Button */}
-        <button
-          onClick={() => {
-            setStudentChatOpen(false);
-            navigate("/all-chat", { 
-              state: { 
-                user: { userId: selectedStudent.studentId, name: selectedStudent.name }, 
-                userType: "student" 
-              } 
-            });
-          }}
-          style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer" }}
-        >
+     <button
+  onClick={() => {
+    setStudentChatOpen(false);
+    navigate("/all-chat", { 
+      state: { 
+        user: { 
+          userId: selectedStudent.userId,  // ✅ Correct userId
+          name: selectedStudent.name, 
+          profileImage: selectedStudent.profileImage || "/default-profile.png" 
+        }, 
+        userType: "student" 
+      } 
+    });
+  }}
+>
+
           <img width="30" height="30" src="https://img.icons8.com/ios-glyphs/30/expand--v1.png" alt="expand" />
         </button>
 
@@ -1174,7 +1373,7 @@ const attendanceStats = useMemo(() => {
               display: "inline-block",
               maxWidth: "80%"
             }}>
-              {msg.content}
+              {msg.text}
               {msg.edited && <span style={{ fontSize: "10px", opacity: 0.7 }}> (edited)</span>}
             </span>
           </div>
@@ -1192,7 +1391,7 @@ const attendanceStats = useMemo(() => {
         placeholder="Type a message..."
         style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }}
       />
-      <button onClick={handleSendMessage} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
+      <button onClick={() => sendPopupMessage(newMessageText)} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
     </div>
   </div>
 )}

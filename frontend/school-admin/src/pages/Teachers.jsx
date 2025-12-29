@@ -12,6 +12,10 @@ import {
 
 } from "react-icons/fa";
 import axios from "axios";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+
+
+
 
 function TeachersPage() {
   const [teachers, setTeachers] = useState([]);
@@ -26,7 +30,7 @@ function TeachersPage() {
   const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 
   const [unreadTeachers, setUnreadTeachers] = useState({});
-
+  const [unreadSenders, setUnreadSenders] = useState([]); 
 
   const navigate = useNavigate();
  const admin = JSON.parse(localStorage.getItem("admin")) || {};
@@ -91,7 +95,9 @@ const weekOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
       : teachers.filter(t => t.gradesSubjects.some(gs => gs.grade === selectedGrade));
 
 
-
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
 
 
 // ---------------- FETCH TEACHER SCHEDULE ----------------
@@ -141,7 +147,15 @@ useEffect(() => {
 }, [selectedTeacher, activeTab]);
 
 
-
+useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
 
 //----------------------Fetch unread messages for teachers--------------------
 
@@ -228,6 +242,140 @@ const sendPopupMessage = async () => {
 };
 
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
+
+
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
+
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
 
 
 // ---------------- MARK MESSAGES AS SEEN ----------------
@@ -286,93 +434,111 @@ useEffect(() => {
   <div className="nav-right">
     <div className="icon-circle"><FaBell /></div>
 
-    {/* ---------- MESSAGE ICON WITH TOTAL UNREAD ---------- */}
-   <div 
-  className="icon-circle" 
-  style={{ position: "relative", cursor: "pointer" }}
-  onClick={() => setShowMessageDropdown(prev => !prev)}
->
-  <FaFacebookMessenger />
-  {Object.values(unreadTeachers).reduce((a, b) => a + b, 0) > 0 && (
-    <span style={{
-      position: "absolute",
-      top: "-5px",
-      right: "-5px",
-      background: "red",
-      color: "#fff",
-      borderRadius: "50%",
-      padding: "2px 6px",
-      fontSize: "10px",
-      fontWeight: "bold"
-    }}>
-      {Object.values(unreadTeachers).reduce((a, b) => a + b, 0)}
-    </span>
-  )}
-
-  {/* ---------- DROPDOWN ---------- */}
-  {showMessageDropdown && (
-    <div style={{
-      position: "absolute",
-      top: "35px",
-      right: "0",
-      width: "300px",
-      maxHeight: "400px",
-      overflowY: "auto",
-      background: "#fff",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      zIndex: 1000
-    }}>
-      {teachers
-        .filter(t => unreadTeachers[t.userId] > 0)
-        .map(t => {
-          const msgs = popupMessages
-            .filter(m => m.senderId === t.userId && !m.seen)
-            .sort((a, b) => a.timeStamp - b.timeStamp);
-          const latestMsg = msgs[msgs.length - 1];
-
-          return (
-            <div
-              key={t.userId}
-              style={{
-                padding: "10px",
-                borderBottom: "1px solid #eee",
-                display: "flex",
-                alignItems: "center",
-                cursor: "default", // no pointer effect
-                background: "#f9f9f9"
-              }}
-            >
-              <img 
-                src={t.profileImage} 
-                alt={t.name} 
-                style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} 
-              />
-              <div style={{ flex: 1 }}>
-                <strong>{t.name}</strong>
-                <p style={{ margin: 0, fontSize: "12px", color: "#555" }}>
-                  {latestMsg?.text || "New message"}
-                </p>
+    {/* ================= MESSENGER ================= */}
+    <div
+      className="icon-circle"
+      style={{ position: "relative", cursor: "pointer" }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowMessageDropdown((prev) => !prev);
+      }}
+    >
+      <FaFacebookMessenger />
+    
+      {/* 🔴 TOTAL UNREAD COUNT */}
+      {Object.keys(unreadSenders).length > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: "-5px",
+            right: "-5px",
+            background: "red",
+            color: "#fff",
+            borderRadius: "50%",
+            padding: "2px 6px",
+            fontSize: "10px",
+            fontWeight: "bold"
+          }}
+        >
+          {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+        </span>
+      )}
+    
+      {/* 📩 DROPDOWN */}
+      {showMessageDropdown && (
+        <div
+          style={{
+            position: "absolute",
+            top: "40px",
+            right: "0",
+            width: "300px",
+            background: "#fff",
+            borderRadius: "10px",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+            zIndex: 1000
+          }}
+        >
+          {Object.keys(unreadSenders).length === 0 ? (
+            <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+              No new messages
+            </p>
+          ) : (
+            Object.entries(unreadSenders).map(([userId, sender]) => (
+              <div
+                key={userId}
+                style={{
+                  padding: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  cursor: "pointer",
+                  borderBottom: "1px solid #eee"
+                }}
+               onClick={() => {
+      setShowMessageDropdown(false);
+    
+      // Build full user object expected by AllChat
+      const user = {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage
+      };
+    
+      navigate("/all-chat", {
+        state: { user }
+      });
+    }}
+    
+    
+              >
+                <img
+                  src={sender.profileImage}
+                  alt={sender.name}
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%"
+                  }}
+                />
+                <div>
+                  <strong>{sender.name}</strong>
+                  <p style={{ fontSize: "12px", margin: 0 }}>
+                    {sender.count} new message{sender.count > 1 && "s"}
+                  </p>
+                </div>
               </div>
-              {latestMsg && (
-                <span style={{ fontSize: "10px", color: "#888", marginLeft: "5px" }}>
-                  {new Date(latestMsg.timeStamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) === 0 && (
-        <p style={{ textAlign: "center", padding: "10px", color: "#777" }}>No new messages</p>
+            ))
+          )}
+        </div>
       )}
     </div>
-  )}
-</div>
+    {/* ============== END MESSENGER ============== */}
+    
 
 
-
-    <div className="icon-circle"><FaCog /></div>
+    <Link className="icon-circle" to="/settings">
+                    <FaCog />
+                  </Link>
     <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
   </div>
 </nav>
@@ -405,9 +571,7 @@ useEffect(() => {
                                    <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
                                               </Link>
                                                         
-                                 <Link className="sidebar-btn" to="/settings" >
-                                              <FaCog /> Settings
-                                            </Link>
+                                 
                                 <button
                                   className="sidebar-btn logout-btn"
                                   onClick={() => {
@@ -421,7 +585,7 @@ useEffect(() => {
         </div>
 
         {/* ---------------- MAIN CONTENT ---------------- */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
           <h2 style={{ marginBottom: "10px", textAlign: "center" }}>Teachers</h2>
 
           {/* Grade Filter */}
@@ -456,8 +620,8 @@ useEffect(() => {
                   key={t.teacherId}
                   onClick={() => setSelectedTeacher(t)}
                   style={{
-                    width: "500px",
-                    height: "70px",
+                    width: "700px",
+                    height: "100px",
                     border: "1px solid #ddd",
                     borderRadius: "12px",
                     padding: "15px",
@@ -473,8 +637,8 @@ useEffect(() => {
                       src={t.profileImage}
                       alt={t.name}
                       style={{
-                        width: "50px",
-                        height: "50px",
+                        width: "65px",
+                        height: "65px",
                         borderRadius: "50%",
                         border: selectedTeacher?.teacherId === t.teacherId ? "3px solid #4b6cb7" : "3px solid red",
                         objectFit: "cover",
@@ -600,26 +764,163 @@ useEffect(() => {
         ))}
       </div>
 
-      {/* ================= DETAILS TAB ================= */}
-      {activeTab === "details" && (
-        <div>
-          <h4 style={{ color: "#4b6cb7", marginBottom: "10px" }}>
-            Teacher Details
-          </h4>
 
-          <p><strong>ID:</strong> {selectedTeacher.teacherId}</p>
 
-          {selectedTeacher.gradesSubjects?.length > 0 ? (
-            selectedTeacher.gradesSubjects.map((gs, i) => (
-              <p key={i} style={{ color: "#374151" }}>
-                Grade {gs.grade} – Section {gs.section} • {gs.subject}
-              </p>
-            ))
-          ) : (
-            <p style={{ color: "#6b7280" }}>No assigned courses</p>
-          )}
+     
+{/* ================= DETAILS TAB ================= */}
+
+
+{activeTab === "details" && selectedTeacher && (
+  <div style={{
+    background: "linear-gradient(145deg, #f0f4ff, #ffffff)",
+    padding: "30px",
+    borderRadius: "24px",
+    boxShadow: "0 20px 40px rgba(0,0,0,0.1)",
+    maxWidth: "900px",
+    margin: "20px auto",
+    fontFamily: "Poppins, sans-serif",
+    transition: "0.4s",
+  }}>
+
+    {/* Header */}
+    <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 30 }}>
+    
+      <div>
+        <h2 style={{ margin: 0, color: "#1e40af", fontSize: 28 }}>{selectedTeacher.name}</h2>
+        <p style={{ margin: 4, color: "#6b7280", fontSize: 14 }}>Teacher ID: <span style={{ fontWeight: 600 }}>{selectedTeacher.teacherId}</span></p>
+      </div>
+    </div>
+
+    {/* Summary Cards */}
+    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 25 }}>
+      <div style={{
+        flex: "1 1 150px",
+        background: "#e0f2fe",
+        padding: "16px",
+        borderRadius: "16px",
+        textAlign: "center",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+        cursor: "default",
+      }}>
+        <h3 style={{ margin: 0, color: "#1e3a8a" }}>{selectedTeacher.gradesSubjects?.length || 0}</h3>
+        <p style={{ margin: 0, color: "#2563eb" }}>Courses Assigned</p>
+      </div>
+
+      <div style={{
+        flex: "1 1 150px",
+        background: "#fde68a",
+        padding: "16px",
+        borderRadius: "16px",
+        textAlign: "center",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+        cursor: "default",
+      }}>
+        <h3 style={{ margin: 0, color: "#b45309" }}>
+          {selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + 1, 0)}
+        </h3>
+        <p style={{ margin: 0, color: "#f59e0b" }}>Subjects</p>
+      </div>
+
+      {/* Busy Periods Icon */}
+      <div style={{
+        flex: "1 1 150px",
+        background: "#fef3c7",
+        padding: "16px",
+        borderRadius: "16px",
+        textAlign: "center",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+        position: "relative",
+      }}>
+        <div style={{
+          width: 40,
+          height: 40,
+          margin: "0 auto 8px",
+          borderRadius: "50%",
+          background: "#fbbf24",
+          animation: "pulse 1.5s infinite",
+        }}></div>
+        <p style={{ margin: 0, fontWeight: 600, color: "#b45309" }}>Busy Periods</p>
+        <p style={{ margin: 0, color: "#92400e", fontSize: 14 }}>
+          {selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0)} / 8
+        </p>
+      </div>
+    </div>
+
+    {/* Courses List */}
+    <div>
+      <h4 style={{ color: "#4b6cb7", marginBottom: 16 }}>Assigned Courses</h4>
+      {selectedTeacher.gradesSubjects?.length > 0 ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: 12 }}>
+          {selectedTeacher.gradesSubjects.map((gs, i) => {
+            const colors = [
+              ["#e0f2fe", "#bae6fd"],
+              ["#d1fae5", "#a7f3d0"],
+              ["#fef3c7", "#fde68a"],
+              ["#fee2e2", "#fecaca"],
+              ["#ede9fe", "#ddd6fe"]
+            ];
+            const color = colors[i % colors.length];
+            const totalPeriods = gs.periods || Math.floor(Math.random() * 5) + 1;
+            const availability = gs.availability || Math.floor(Math.random() * 100);
+
+            return (
+              <div key={i} style={{
+                background: `linear-gradient(135deg, ${color[0]}, ${color[1]})`,
+                padding: "14px",
+                borderRadius: "16px",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+                cursor: "pointer",
+                position: "relative",
+                overflow: "hidden"
+              }}>
+                <p style={{ margin: 0, fontWeight: 600, color: "#1e3a8a" }}>{gs.subject}</p>
+                <small style={{ color: "#374151" }}>Grade {gs.grade} • Section {gs.section}</small>
+              </div>
+            );
+          })}
         </div>
+      ) : (
+        <p style={{ color: "#9ca3af", fontStyle: "italic" }}>No assigned courses yet</p>
       )}
+    </div>
+
+    {/* Pie Chart: Busy vs Free Periods */}
+    <div style={{ marginTop: 40, background: "#fefefe", padding: 20, borderRadius: 16, boxShadow: "0 10px 25px rgba(0,0,0,0.08)" }}>
+      <h4 style={{ color: "#4b6cb7", marginBottom: 12 }}>Workload Overview</h4>
+      <ResponsiveContainer width="100%" height={200}>
+        <PieChart>
+          <Pie
+            data={[
+              { name: "Busy", value: selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0) || 0 },
+              { name: "Free", value: 8 - (selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0) || 0) }
+            ]}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius={70}
+            innerRadius={40}
+            paddingAngle={4}
+          >
+            <Cell key="busy" fill="#4b6cb7" />
+            <Cell key="free" fill="#dbeafe" />
+          </Pie>
+          <Tooltip />
+        </PieChart>
+      </ResponsiveContainer>
+      <p style={{ textAlign: "center", marginTop: 8, fontWeight: 600, color: "#1e3a8a" }}>Busy vs Free Periods</p>
+    </div>
+
+    <style>{`
+      @keyframes pulse {
+        0% { transform: scale(0.9); opacity: 0.7; }
+        50% { transform: scale(1.1); opacity: 1; }
+        100% { transform: scale(0.9); opacity: 0.7; }
+      }
+    `}</style>
+  </div>
+)}
+
 
       
 {/* ================= SCHEDULE TAB ================= */}

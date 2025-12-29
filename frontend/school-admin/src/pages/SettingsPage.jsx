@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaFacebookMessenger , FaSearch  } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaFacebookMessenger , FaSearch, FaCalendarAlt  } from "react-icons/fa";
 import axios from "axios";
 import useDarkMode from "../hooks/useDarkMode";
+import { useNavigate } from "react-router-dom";
+
 
 function SettingsPage() {
   const [admin, setAdmin] = useState(JSON.parse(localStorage.getItem("admin")) || {});
@@ -14,9 +16,9 @@ function SettingsPage() {
   const [username, setUsername] = useState(admin.username || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  
-  
-  
+    const navigate = useNavigate();
+  const [unreadSenders, setUnreadSenders] = useState([]); 
+  const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 
   const handleFileChange = (e) => setSelectedFile(e.target.files[0]);
 
@@ -74,6 +76,171 @@ function SettingsPage() {
     }
   };
 
+    const toggleDropdown = () => {
+    setShowMessageDropdown(prev => !prev);
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const closeDropdown = (e) => {
+      // Optional: check if click is outside the dropdown element
+      setShowMessageDropdown(false);
+    };
+
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
+
+
+  useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
+
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
+
+
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
+
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
   return (
     <div className="dashboard-page">
      
@@ -93,15 +260,110 @@ function SettingsPage() {
            <FaBell />
          </div>
 
-           {/* Messenger */}
-    <div className="icon-circle">
-      <FaFacebookMessenger />
-    </div>
-     
+   {/* ================= MESSENGER ================= */}
+   <div
+     className="icon-circle"
+     style={{ position: "relative", cursor: "pointer" }}
+     onClick={(e) => {
+       e.stopPropagation();
+       setShowMessageDropdown((prev) => !prev);
+     }}
+   >
+     <FaFacebookMessenger />
+   
+     {/* 🔴 TOTAL UNREAD COUNT */}
+     {Object.keys(unreadSenders).length > 0 && (
+       <span
+         style={{
+           position: "absolute",
+           top: "-5px",
+           right: "-5px",
+           background: "red",
+           color: "#fff",
+           borderRadius: "50%",
+           padding: "2px 6px",
+           fontSize: "10px",
+           fontWeight: "bold"
+         }}
+       >
+         {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+       </span>
+     )}
+   
+     {/* 📩 DROPDOWN */}
+     {showMessageDropdown && (
+       <div
+         style={{
+           position: "absolute",
+           top: "40px",
+           right: "0",
+           width: "300px",
+           background: "#fff",
+           borderRadius: "10px",
+           boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+           zIndex: 1000
+         }}
+       >
+         {Object.keys(unreadSenders).length === 0 ? (
+           <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+             No new messages
+           </p>
+         ) : (
+           Object.entries(unreadSenders).map(([userId, sender]) => (
+             <div
+               key={userId}
+               style={{
+                 padding: "12px",
+                 display: "flex",
+                 alignItems: "center",
+                 gap: "10px",
+                 cursor: "pointer",
+                 borderBottom: "1px solid #eee"
+               }}
+              onClick={() => {
+     setShowMessageDropdown(false);
+   
+     // Build full user object expected by AllChat
+     const user = {
+       userId,
+       name: sender.name,
+       profileImage: sender.profileImage
+     };
+   
+     navigate("/all-chat", {
+       state: { user }
+     });
+   }}
+   
+   
+             >
+               <img
+                 src={sender.profileImage}
+                 alt={sender.name}
+                 style={{
+                   width: "42px",
+                   height: "42px",
+                   borderRadius: "50%"
+                 }}
+               />
+               <div>
+                 <strong>{sender.name}</strong>
+                 <p style={{ fontSize: "12px", margin: 0 }}>
+                   {sender.count} new message{sender.count > 1 && "s"}
+                 </p>
+               </div>
+             </div>
+           ))
+         )}
+       </div>
+     )}
+   </div>
+   {/* ============== END MESSENGER ============== */}
+   
          {/* Settings */}
-         <div className="icon-circle">
-           <FaCog />
-         </div>
+           <Link className="icon-circle" to="/settings">
+                 <FaCog />
+               </Link>
      
          {/* Profile */}
          <img
@@ -128,20 +390,31 @@ function SettingsPage() {
             <p>{admin.username}</p>
           </div>
           <div className="sidebar-menu">
-            <Link className="sidebar-btn" to="/dashboard"><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
-            <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
-            <Link className="sidebar-btn" to="/students"><FaChalkboardTeacher /> Students</Link>
-            <Link className="sidebar-btn" to="/settings" style={{ background: "#4b6cb7", color: "#fff" }}><FaCog /> Settings</Link>
-            <button
-              className="sidebar-btn logout-btn"
-              onClick={() => {
-                localStorage.removeItem("admin");
-                window.location.href = "/login";
-              }}
-            >
-              <FaSignOutAlt /> Logout
-            </button>
+           <Link className="sidebar-btn" to="/dashboard"
+                 
+                  > <FaHome style={{ width: "28px", height:"28px" }}/> Home</Link>
+                   <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
+                   <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
+                     <Link className="sidebar-btn" to="/students" > <FaChalkboardTeacher /> Students</Link>
+                      <Link
+                                   className="sidebar-btn"
+                                   to="/schedule"
+                                   
+                                 >
+                                   <FaCalendarAlt /> Schedule
+                                 </Link>
+                      <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
+                                 </Link>
+               
+                   <button
+                     className="sidebar-btn logout-btn"
+                     onClick={() => {
+                       localStorage.removeItem("admin");
+                       window.location.href = "/login";
+                     }}
+                   >
+                     <FaSignOutAlt /> Logout
+                   </button>
           </div>
         </div>
 

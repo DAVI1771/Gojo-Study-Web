@@ -4,12 +4,14 @@ import { Link } from "react-router-dom";
 import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell, FaFacebookMessenger ,  FaSearch, FaCalendarAlt  } from "react-icons/fa";
 import { AiFillPicture } from "react-icons/ai";
 import "../styles/global.css";
+import { useNavigate } from "react-router-dom";
+
 
 function MyPosts() {
   const [posts, setPosts] = useState([]);
   const [editingPostId, setEditingPostId] = useState(null);
   const [editedContent, setEditedContent] = useState("");
-  
+  const navigate = useNavigate(); 
   // New post states
   const [postText, setPostText] = useState("");
   const [postMedia, setPostMedia] = useState(null);
@@ -19,7 +21,7 @@ const [popupMessages, setPopupMessages] = useState([]);
 const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
-
+const [unreadSenders, setUnreadSenders] = useState([]); 
 
 
 
@@ -38,6 +40,22 @@ const adminUserId = admin.userId;
     fetchMyPosts();
   }, [adminId]);
 
+
+  useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
+
+
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
    const fetchMyPosts = async () => {
     try {
       const res = await axios.get(`http://127.0.0.1:5000/api/get_my_posts/${adminId}`);
@@ -51,7 +69,7 @@ const adminUserId = admin.userId;
     if (!window.confirm("Are you sure you want to delete this post?")) return;
     try {
       await axios.delete(`http://127.0.0.1:5000/api/delete_post/${postId}`, {
-        data: { adminId: admin.adminId },
+        data: { adminId },
       });
       setPosts(posts.filter((post) => post.postId !== postId));
     } catch (err) {
@@ -67,7 +85,7 @@ const adminUserId = admin.userId;
   const saveEdit = async (postId) => {
     try {
       await axios.post(`http://127.0.0.1:5000/api/edit_post/${postId}`, {
-        adminId: admin.adminId,
+        adminId,
         postText: editedContent,
       });
       setPosts(
@@ -111,6 +129,140 @@ const adminUserId = admin.userId;
       console.error("Error liking post:", err);
     }
   };
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
+
+
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
+
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
 
 
 useEffect(() => {
@@ -209,99 +361,112 @@ useEffect(() => {
         <FaBell />
       </div>
 
-        {/* Messenger */}
-    <div 
-  className="icon-circle" 
-  style={{ position: "relative", cursor: "pointer" }}
-  onClick={() => setShowMessageDropdown(prev => !prev)}
->
-  <FaFacebookMessenger />
-  {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) > 0 && (
-    <span style={{
-      position: "absolute",
-      top: "-5px",
-      right: "-5px",
-      background: "red",
-      color: "#fff",
-      borderRadius: "50%",
-      padding: "2px 6px",
-      fontSize: "10px",
-      fontWeight: "bold"
-    }}>
-      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0)}
-    </span>
-  )}
-
-  {showMessageDropdown && (
-    <div style={{
-      position: "absolute",
-      top: "35px",
-      right: "0",
-      width: "300px",
-      maxHeight: "400px",
-      overflowY: "auto",
-      background: "#fff",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      zIndex: 1000
-    }}>
-      {teachers.map(t => {
-        const msgs = popupMessages
-          .filter(m => m.senderId === t.userId || m.receiverId === t.userId)
-          .sort((a,b) => a.timeStamp - b.timeStamp);
-        const latestMsg = msgs[msgs.length - 1];
-
-        return (
-          <div
-            key={t.userId}
-            onClick={() => {
-              setSelectedTeacher(t);
-              setTeacherChatOpen(true);
-              setShowMessageDropdown(false);
-            }}
-            style={{
-              padding: "10px",
-              borderBottom: "1px solid #eee",
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              background: unreadTeachers[t.userId] > 0 ? "#f0f4ff" : "#fff"
-            }}
-          >
-            <img src={t.profileImage} alt={t.name} style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} />
-            <div style={{ flex: 1 }}>
-              <strong>{t.name}</strong>
-              <p style={{ margin:0, fontSize:"12px", color:"#555" }}>{latestMsg?.text || "No messages yet"}</p>
-            </div>
-            {unreadTeachers[t.userId] > 0 && (
-              <span style={{
-                background: "red",
-                color: "#fff",
-                borderRadius: "50%",
-                padding: "2px 6px",
-                fontSize: "10px",
-                marginLeft: "5px"
-              }}>
-                {unreadTeachers[t.userId]}
-              </span>
-            )}
-          </div>
-        )
-      })}
-      {teachers.every(t => !unreadTeachers[t.userId]) && (
-        <p style={{ textAlign: "center", padding: "10px", color:"#777" }}>No new messages</p>
-      )}
-    </div>
-  )}
-</div>
-
+   {/* ================= MESSENGER ================= */}
+   <div
+     className="icon-circle"
+     style={{ position: "relative", cursor: "pointer" }}
+     onClick={(e) => {
+       e.stopPropagation();
+       setShowMessageDropdown((prev) => !prev);
+     }}
+   >
+     <FaFacebookMessenger />
+   
+     {/* 🔴 TOTAL UNREAD COUNT */}
+     {Object.keys(unreadSenders).length > 0 && (
+       <span
+         style={{
+           position: "absolute",
+           top: "-5px",
+           right: "-5px",
+           background: "red",
+           color: "#fff",
+           borderRadius: "50%",
+           padding: "2px 6px",
+           fontSize: "10px",
+           fontWeight: "bold"
+         }}
+       >
+         {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+       </span>
+     )}
+   
+     {/* 📩 DROPDOWN */}
+     {showMessageDropdown && (
+       <div
+         style={{
+           position: "absolute",
+           top: "40px",
+           right: "0",
+           width: "300px",
+           background: "#fff",
+           borderRadius: "10px",
+           boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+           zIndex: 1000
+         }}
+       >
+         {Object.keys(unreadSenders).length === 0 ? (
+           <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+             No new messages
+           </p>
+         ) : (
+           Object.entries(unreadSenders).map(([userId, sender]) => (
+             <div
+               key={userId}
+               style={{
+                 padding: "12px",
+                 display: "flex",
+                 alignItems: "center",
+                 gap: "10px",
+                 cursor: "pointer",
+                 borderBottom: "1px solid #eee"
+               }}
+              onClick={() => {
+     setShowMessageDropdown(false);
+   
+     // Build full user object expected by AllChat
+     const user = {
+       userId,
+       name: sender.name,
+       profileImage: sender.profileImage
+     };
+   
+     navigate("/all-chat", {
+       state: { user }
+     });
+   }}
+   
+   
+             >
+               <img
+                 src={sender.profileImage}
+                 alt={sender.name}
+                 style={{
+                   width: "42px",
+                   height: "42px",
+                   borderRadius: "50%"
+                 }}
+               />
+               <div>
+                 <strong>{sender.name}</strong>
+                 <p style={{ fontSize: "12px", margin: 0 }}>
+                   {sender.count} new message{sender.count > 1 && "s"}
+                 </p>
+               </div>
+             </div>
+           ))
+         )}
+       </div>
+     )}
+   </div>
+   {/* ============== END MESSENGER ============== */}
+   
   
       {/* Settings */}
-      <div className="icon-circle">
+      <Link className="icon-circle" to="/settings">
         <FaCog />
-      </div>
-  
+      </Link>
+
       {/* Profile */}
       <img
         src={admin.profileImage || "/default-profile.png"}
@@ -344,9 +509,7 @@ useEffect(() => {
                 <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
                            </Link>
                                      
-              <Link className="sidebar-btn" to="/settings" >
-                           <FaCog /> Settings
-                         </Link>
+          
              <button
                className="sidebar-btn logout-btn"
                onClick={() => {
