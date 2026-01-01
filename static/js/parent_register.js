@@ -2,29 +2,80 @@ document.getElementById("parentForm").addEventListener("submit", function (e) {
     e.preventDefault();
 
     const formData = new FormData();
-    formData.append("name", document.getElementById("name").value);
-    formData.append("phone", document.getElementById("phone").value);
-    formData.append("username", document.getElementById("username").value);
-    formData.append("password", document.getElementById("password").value);
 
-    // Multiple student IDs and relationships
-    const studentIds = document.querySelectorAll(".studentId");
-    const relationships = document.querySelectorAll(".relationship");
+    const name = document.getElementById("name").value.trim();
+    const phone = document.getElementById("phone").value.trim();
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value.trim();
 
-    studentIds.forEach(input => formData.append("studentId", input.value));
-    relationships.forEach(input => formData.append("relationship", input.value));
+    if (!name || !phone || !username || !password) {
+        alert("Please fill all parent details");
+        return;
+    }
 
-    // Profile image (optional)
+    formData.append("name", name);
+    formData.append("phone", phone);
+    formData.append("username", username);
+    formData.append("password", password);
+
+    const studentInputs = document.querySelectorAll(".studentId");
+    const relationshipInputs = document.querySelectorAll(".relationship");
+
+    const seenStudents = new Set();
+
+    for (let i = 0; i < studentInputs.length; i++) {
+        const studentId = studentInputs[i].value.trim();
+        const relationship = relationshipInputs[i].value;
+
+        if (!studentId || !relationship) {
+            alert("Please fill all student fields");
+            return;
+        }
+
+        if (seenStudents.has(studentId)) {
+            alert("Duplicate Student ID detected");
+            return;
+        }
+
+        seenStudents.add(studentId);
+
+        formData.append("studentId", studentId);
+        formData.append("relationship", relationship);
+    }
+
     const profile = document.getElementById("profile").files[0];
     if (profile) formData.append("profile", profile);
 
-    fetch("/register/parent", { method: "POST", body: formData })
+    fetch("/register/parent", {
+        method: "POST",
+        body: formData
+    })
         .then(res => res.json())
         .then(res => {
             alert(res.message);
-            if (res.success) document.getElementById("parentForm").reset();
+            if (res.success) {
+                document.getElementById("parentForm").reset();
+                document.getElementById("childrenContainer").innerHTML = `
+                    <div class="child-row">
+                        <label>Student ID</label>
+                        <input type="text" name="studentId" class="studentId" required>
+
+                        <label>Relationship</label>
+                        <select name="relationship" class="relationship" required>
+                            <option value="">Select</option>
+                            <option value="Father">Father</option>
+                            <option value="Mother">Mother</option>
+                            <option value="Guardian">Guardian</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                `;
+            }
         })
-        .catch(err => console.error(err));
+        .catch(err => {
+            console.error(err);
+            alert("Registration failed. Try again.");
+        });
 });
 
 // Add dynamic student input
@@ -34,32 +85,19 @@ document.getElementById("addStudent").addEventListener("click", function () {
     const row = document.createElement("div");
     row.className = "child-row";
 
-    const sidLabel = document.createElement("label");
-    sidLabel.innerText = "Student ID";
-    const sidInput = document.createElement("input");
-    sidInput.type = "text";
-    sidInput.name = "studentId";
-    sidInput.className = "studentId";
-    sidInput.required = true;
+    row.innerHTML = `
+        <label>Student ID</label>
+        <input type="text" name="studentId" class="studentId" required>
 
-    const relLabel = document.createElement("label");
-    relLabel.innerText = "Relationship";
-    const relSelect = document.createElement("select");
-    relSelect.name = "relationship";
-    relSelect.className = "relationship";
-    relSelect.required = true;
-    relSelect.innerHTML = `
-        <option value="">Select</option>
-        <option value="Father">Father</option>
-        <option value="Mother">Mother</option>
-        <option value="Guardian">Guardian</option>
-        <option value="Other">Other</option>
+        <label>Relationship</label>
+        <select name="relationship" class="relationship" required>
+            <option value="">Select</option>
+            <option value="Father">Father</option>
+            <option value="Mother">Mother</option>
+            <option value="Guardian">Guardian</option>
+            <option value="Other">Other</option>
+        </select>
     `;
-
-    row.appendChild(sidLabel);
-    row.appendChild(sidInput);
-    row.appendChild(relLabel);
-    row.appendChild(relSelect);
 
     container.appendChild(row);
 });

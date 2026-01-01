@@ -449,11 +449,11 @@ def register_parent():
     password = request.form.get('password')
     profile_file = request.files.get('profile')
 
-    # 🔴 Get multiple children
+    # Multiple children
     student_ids = request.form.getlist('studentId')
     relationships = request.form.getlist('relationship')
 
-    # 🔴 Validation
+    # Validation
     if not all([name, username, phone, password]) or not student_ids or not relationships:
         return jsonify({
             "success": False,
@@ -463,23 +463,23 @@ def register_parent():
     if len(student_ids) != len(relationships):
         return jsonify({
             "success": False,
-            "message": "Each student must have a relationship defined"
+            "message": "Each student must have a relationship"
         }), 400
 
     users_ref = db.reference('Users')
     parents_ref = db.reference('Parents')
     students_ref = db.reference('Students')
 
-    # 🔴 Check username uniqueness
+    # Check username uniqueness
     all_users = users_ref.get() or {}
     for user in all_users.values():
         if user.get("username") == username:
             return jsonify({
                 "success": False,
                 "message": "Username already exists"
-            })
+            }), 409
 
-    # 🖼 Upload profile image (optional)
+    # Upload profile image (optional)
     profile_url = "/default-profile.png"
     if profile_file:
         filename = f"parents/{username}_{profile_file.filename}"
@@ -488,9 +488,10 @@ def register_parent():
         blob.make_public()
         profile_url = blob.public_url
 
-    # 👤 Create Parent User
+    # 1️⃣ Create parent USER
     new_user_ref = users_ref.push()
     parent_user_id = new_user_ref.key
+
     new_user_ref.set({
         "userId": parent_user_id,
         "username": username,
@@ -502,24 +503,41 @@ def register_parent():
         "isActive": True
     })
 
-    # 👨‍👩‍👧 Create Parent node for each child
-    for sid, rel in zip(student_ids, relationships):
-        student_data = students_ref.child(sid).get()
-        if not student_data:
-            continue  # skip invalid studentId
+    # 2️⃣ Create PARENT node (new parentId)
+    parent_ref = parents_ref.push()
+    parent_id = parent_ref.key
 
-        student_user_id = student_data.get('userId')
-        parents_ref.child(parent_user_id).push({
-            "userId": student_user_id,  # Student's Users.userId
-            "studentId": sid,           # Student's Students key
-            "relationship": rel
+    parent_ref.set({
+        "userId": parent_user_id,
+        "status": "active",
+        "createdAt": datetime.utcnow().isoformat(),
+        "children": {}
+    })
+
+    # 3️⃣ Link children BOTH ways
+    for student_id, relationship in zip(student_ids, relationships):
+        student_data = students_ref.child(student_id).get()
+        if not student_data:
+            continue  # skip invalid student
+
+        # Add child under Parents
+        parent_ref.child("children").push({
+            "studentId": student_id,
+            "relationship": relationship
+        })
+
+        # Add parent under Students
+        students_ref.child(student_id).child("parents").child(parent_id).set({
+            "relationship": relationship
         })
 
     return jsonify({
         "success": True,
         "message": "Parent registered successfully",
+        "parentId": parent_id,
         "parentUserId": parent_user_id
     })
+
 
 
 
