@@ -48,6 +48,11 @@ function AllChat() {
 const passedUser = location.state?.user || null;
 const [selectedChatUser, setSelectedChatUser] = useState(passedUser);
 
+
+
+
+
+
 useEffect(() => {
   if (!selectedChatUser) {
     const firstUser = (teachers[0] || students[0] || parents[0]) || null;

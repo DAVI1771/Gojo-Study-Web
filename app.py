@@ -412,19 +412,23 @@ def update_course_marks(course_id):
 @app.route("/api/get_posts", methods=["GET"])
 def get_posts():
     posts_ref = db.reference("Posts")
-    admins_ref = db.reference("School_Admins")
+    users_ref = db.reference("Users")
 
     all_posts = posts_ref.get() or {}
+    all_users = users_ref.get() or {}
+
     result = []
 
     for post_id, post in all_posts.items():
-        admin_id = post.get("adminId")
-        admin = admins_ref.child(admin_id).get() or {}
+        user_id = post.get("adminId")  # ⚠️ THIS IS userId
+
+        user = all_users.get(user_id, {})
+
         result.append({
             "postId": post_id,
-            "adminId": admin_id,
-            "adminName": admin.get("name", "Admin"),
-            "adminProfile": admin.get("profileImage", "/default-profile.png"),
+            "adminId": user_id,
+            "adminName": user.get("name", "Admin"),
+            "adminProfile": user.get("profileImage", "/default-profile.png"),
             "message": post.get("message", ""),
             "postUrl": post.get("postUrl"),
             "timestamp": post.get("time", ""),

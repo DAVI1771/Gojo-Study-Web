@@ -22,15 +22,16 @@ const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
 const [unreadSenders, setUnreadSenders] = useState([]); 
+const [postNotifications, setPostNotifications] = useState([]);
+const [showPostDropdown, setShowPostDropdown] = useState(false);
 
 
 
 
   // Logged-in admin
   const admin = JSON.parse(localStorage.getItem("admin")) || {};
-const adminUserId = admin.userId;
-  // SAFELY GET ADMIN ID
-  const adminId = admin.adminId || admin.userId || admin.id;
+const adminId = admin.userId;
+
 
  useEffect(() => {
     if (!adminId) {
@@ -39,6 +40,56 @@ const adminUserId = admin.userId;
     }
     fetchMyPosts();
   }, [adminId]);
+
+  // ---------------- FETCH POST NOTIFICATIONS ----------------
+
+const fetchPostNotifications = async () => {
+  try {
+    const res = await axios.get(`http://127.0.0.1:5000/api/get_post_notifications/${adminId}`);
+    console.log("Notifications fetched:", res.data);
+
+    // Ensure all objects have notificationId
+    const notifications = (res.data || []).map(n => ({
+      ...n,
+      notificationId: n.notificationId || n.id
+    }));
+
+    setPostNotifications(notifications);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+  }
+};
+
+
+
+// -----------------------------
+// Add at the top
+// -----------------------------
+
+
+useEffect(() => {
+  fetchPostNotifications();
+  const interval = setInterval(fetchPostNotifications, 5000);
+  return () => clearInterval(interval);
+}, [adminId]);
+
+const handleNotificationClick = async (notification) => {
+  // 1️⃣ Mark as read in backend
+  await axios.post("http://127.0.0.1:5000/api/mark_post_notification_read", {
+    notificationId: notification.notificationId
+  });
+
+  // 2️⃣ Remove from UI
+  setPostNotifications(prev =>
+    prev.filter(n => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // 3️⃣ Navigate to dashboard page with postId in state
+  navigate("/dashboard", { state: { postId: notification.postId } });
+};
+
 
 
   useEffect(() => {
@@ -105,7 +156,8 @@ const handleClick = () => {
   const handleLike = async (postId) => {
     try {
       const res = await axios.post("http://127.0.0.1:5000/api/like_post", {
-        adminId: admin.adminId,
+        adminId: adminId,
+
         postId,
       });
 
@@ -118,7 +170,7 @@ const handleClick = () => {
                   likeCount: res.data.likeCount,
                   likes: {
                     ...post.likes,
-                    [admin.adminId]: res.data.liked ? true : undefined,
+                    [adminId]: res.data.liked ? true : undefined,
                   },
                 }
               : post
@@ -129,6 +181,11 @@ const handleClick = () => {
       console.error("Error liking post:", err);
     }
   };
+
+
+
+
+
  // ---------------- FETCH UNREAD MESSAGES ----------------
 const fetchUnreadMessages = async () => {
   if (!admin.userId) return;
@@ -254,6 +311,18 @@ useEffect(() => {
   return () => document.removeEventListener("click", closeDropdown);
 }, []);
 
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (!e.target.closest(".icon-circle") && !e.target.closest(".notification-dropdown")) {
+      setShowPostDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
 
 useEffect(() => {
   if (!admin.userId) return;
@@ -294,15 +363,17 @@ useEffect(() => {
       const allMessages = [];
 
       for (const t of teacherList) {
-        const chatKey = `${adminUserId}_${t.userId}`;
+        const chatKey = `${adminId}_${t.userId}`;
         const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
         const msgs = Object.values(res.data || {}).map(m => ({
           ...m,
-          sender: m.senderId === adminUserId ? "admin" : "teacher"
+          sender: m.senderId === adminId
+ ? "admin" : "teacher"
         }));
         allMessages.push(...msgs);
 
-        const unreadCount = msgs.filter(m => m.receiverId === adminUserId && !m.seen).length;
+        const unreadCount = msgs.filter(m => m.receiverId === adminId
+ && !m.seen).length;
         if (unreadCount > 0) unread[t.userId] = unreadCount;
       }
 
@@ -315,7 +386,7 @@ useEffect(() => {
   };
 
   fetchTeachersAndUnread();
-}, [adminUserId]);
+}, [adminId]);
 
 
 
@@ -324,7 +395,8 @@ useEffect(() => {
     if (!postText && !postMedia) return; // don't allow empty posts
     try {
       const formData = new FormData();
-      formData.append("adminId", admin.adminId);
+     formData.append("adminId", adminId);
+
       formData.append("postText", postText);
       if (postMedia) formData.append("postMedia", postMedia);
 
@@ -342,6 +414,38 @@ useEffect(() => {
     }
   };
 
+
+const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
+
   return (
     <div className="dashboard-page">
   
@@ -357,9 +461,105 @@ useEffect(() => {
   
     <div className="nav-right">
       {/* Notification */}
-      <div className="icon-circle">
-        <FaBell />
-      </div>
+{/* Notification Icon */}
+<div
+  className="icon-circle"
+  style={{ position: "relative", cursor: "pointer" }}
+  onClick={(e) => {
+    e.stopPropagation(); // prevents document click from closing immediately
+    setShowPostDropdown(prev => !prev);
+  }}
+>
+  <FaBell />
+
+  {/* Notification Badge */}
+  {postNotifications.length > 0 && (
+    <span
+      style={{
+        position: "absolute",
+        top: "-5px",
+        right: "-5px",
+        background: "red",
+        color: "#fff",
+        borderRadius: "50%",
+        padding: "2px 6px",
+        fontSize: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      {postNotifications.length}
+    </span>
+  )}
+
+  {/* Notification Dropdown */}
+  {showPostDropdown && (
+    <div
+      className="notification-dropdown"
+      style={{
+        position: "absolute",
+        top: "40px",
+        right: "0",
+        width: "350px",
+        maxHeight: "400px",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: "10px",
+        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+        zIndex: 1000,
+        padding: "5px 0"
+      }}
+      onClick={(e) => e.stopPropagation()} // 🔹 important: stop clicks from bubbling
+    >
+      {postNotifications.length === 0 ? (
+        <p style={{ padding: "12px", textAlign: "center" }}>No new notifications</p>
+      ) : (
+        postNotifications.map((n) => (
+          <div
+            key={n.notificationId}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px",
+              cursor: "pointer",
+              borderBottom: "1px solid #eee"
+            }}
+            onClick={async () => {
+              // Mark as read
+              await axios.post("http://127.0.0.1:5000/api/mark_post_notification_read", {
+                notificationId: n.notificationId
+              });
+
+              // Remove from UI
+              setPostNotifications(prev =>
+                prev.filter(notif => notif.notificationId !== n.notificationId)
+              );
+
+              setShowPostDropdown(false);
+
+              // Navigate to dashboard
+              navigate("/dashboard", { state: { postId: n.postId } });
+            }}
+          >
+            <img
+              src={n.adminProfile || "/default-profile.png"}
+              alt={n.adminName}
+              style={{ width: "40px", height: "40px", borderRadius: "50%" }}
+            />
+            <div>
+              <strong>{n.adminName}</strong>
+              <p style={{ margin: 0 }}>{n.message}</p>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )}
+</div>
+
+
+
+
 
    {/* ================= MESSENGER ================= */}
    <div
@@ -421,20 +621,32 @@ useEffect(() => {
                  cursor: "pointer",
                  borderBottom: "1px solid #eee"
                }}
-              onClick={() => {
-     setShowMessageDropdown(false);
-   
-     // Build full user object expected by AllChat
-     const user = {
-       userId,
-       name: sender.name,
-       profileImage: sender.profileImage
-     };
-   
-     navigate("/all-chat", {
-       state: { user }
-     });
-   }}
+     onClick={async () => {
+  setShowMessageDropdown(false);
+
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
+
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
+  navigate("/all-chat", {
+    state: {
+      user: {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
+  });
+}}
+
    
    
              >
@@ -589,6 +801,7 @@ useEffect(() => {
             {posts.map((post) => (
               <div
                 key={post.postId}
+                id={`post-${post.postId}`} // ✅ this is essential
                style={{
                        width: "55%",               // fixed width
                        margin: "0 5% 30px 40%", /* top:0, right:0, bottom:30px, left:25% */

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
-import { FaHome, FaCog, FaSignOutAlt, FaSave, FaBell, FaSearch, FaClipboardCheck, FaUsers } from "react-icons/fa";
+import { FaHome, FaCog, FaSignOutAlt, FaSave, FaBell, FaSearch, FaClipboardCheck, FaUsers, FaChalkboardTeacher, FaFacebookMessenger } from "react-icons/fa";
 import "../styles/global.css";
 
 // ---------------- GRADE CALCULATION ----------------
@@ -24,9 +24,19 @@ function MarksPage() {
   
 const [studentMarks, setStudentMarks] = useState({});
 const [studentTab, setStudentTab] = useState("performance");
+const [teacher, setTeacher] = useState(null);
 
-  const teacherUserId = teacherInfo?.userId;
 
+  // Load teacher from localStorage on mount
+  useEffect(() => {
+    const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
+    if (storedTeacher) {
+      setTeacher(storedTeacher);
+    }
+  }, []);
+
+  // Optional chaining to prevent crash if teacher is null
+  const teacherId = teacher?.userId;
   // ---------------- LOAD LOGGED-IN TEACHER ----------------
   useEffect(() => {
     const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
@@ -36,6 +46,12 @@ const [studentTab, setStudentTab] = useState("performance");
     }
     setTeacherInfo(storedTeacher);
   }, [navigate]);
+
+  
+ const handleLogout = () => {
+    localStorage.removeItem("teacher"); // or "user", depending on your auth
+    navigate("/login");
+  };
 
   // ---------------- FETCH STUDENTS AND COURSES ----------------
   useEffect(() => {
@@ -202,50 +218,77 @@ Object.entries(marksData).forEach(([courseId, studentsInCourse]) => {
   if (!teacherInfo) return null;
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* TOP NAVBAR */}
-      <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: "60px", background: "#fff", display: "flex", alignItems: "center", padding: "0 30px", borderBottom: "1px solid #eee", zIndex: 1000 }}>
-        <h2>Student Marks</h2>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "15px" }}>
-          <FaSearch style={{ cursor: "pointer" }} />
-          <div style={{ width: "40px", height: "40px", borderRadius: "50%", overflow: "hidden" }}>
-            <img src={teacherInfo.profileImage} alt="teacher" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
-          </div>
-        </div>
-      </div>
-
-      {/* LEFT SIDEBAR */}
-      <div style={{ width: "300px", marginTop: "60px", position: "fixed", top: 0, left: 0, height: "100vh", background: "#fff", padding: "20px", borderRight: "1px solid #eee" }}>
-        {teacherInfo && (
-          <div style={{ textAlign: "center", padding: "20px", borderBottom: "1px solid #ddd" }}>
-            <div style={{ width: "80px", height: "80px", margin: "0 auto 10px", borderRadius: "50%", overflow: "hidden", border: "3px solid #4b6cb7" }}>
-              <img src={teacherInfo.profileImage || "/default-profile.png"} alt={teacherInfo.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+   
+<div className="dashboard-page">
+                  {/* Top Navbar */}
+                  <nav className="top-navbar">
+                    <h2>Gojo Dashboard</h2>
+                    <div className="nav-search">
+                      <FaSearch className="search-icon" />
+                      <input type="text" placeholder="Search Teacher and Student..." />
+                    </div>
+                    <div className="nav-right">
+                      <div className="icon-circle"><FaBell /></div>
+                      <div className="icon-circle"><FaFacebookMessenger /></div>
+                      <div className="icon-circle"><FaCog /></div>
+                      
+        
+              <img src={teacher?.profileImage || "/default-profile.png"} />
+        
+                    </div>
+                  </nav>
+            
+                  <div className="google-dashboard">
+                    {/* Sidebar */}
+                    <div className="google-sidebar">
+                  {teacher && (
+          <div className="sidebar-profile">
+            <div className="sidebar-img-circle">
+              <img src={teacher.profileImage || "/default-profile.png"} alt="profile" />
             </div>
-            <h3 style={{ margin: "5px 0", fontSize: "18px" }}>{teacherInfo.name}</h3>
-            <p style={{ fontSize: "14px", color: "#555" }}>{teacherInfo.username || teacherInfo.email}</p>
+            <h3>{teacher.name}</h3>
+            <p>{teacher.username}</p>
           </div>
         )}
-        <div className="sidebar-menu">
-        <Link className="sidebar-btn" to="/dashboard" ><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/notes" ><FaClipboardCheck /> Notes</Link>        
-                    
-                    <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
-                      <Link className="sidebar-btn" to="/admins" ><FaUsers /> Admins</Link>
-                    <Link
-                             className="sidebar-btn"
-                             to="/marks" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}
-                             
-                           ><FaClipboardCheck />
-                             Marks
-                           </Link>
-                           <Link to="/attendance" className="sidebar-btn">
-                                                                <FaUsers /> Attendance
-                                                              </Link>
-                    <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
-          <Link className="sidebar-btn" to="/logout"><FaSignOutAlt /> Logout</Link>
-        </div>
-      </div>
-
+        
+                      <div className="sidebar-menu">
+                        <Link
+                          className="sidebar-btn"
+                          to="/dashboard"
+                      
+                        >
+                          <FaHome /> Home
+                        </Link>
+                        <Link className="sidebar-btn" to="/notes">
+                          <FaClipboardCheck /> Notes
+                        </Link>
+                        <Link className="sidebar-btn" to="/students">
+                          <FaUsers /> Students
+                        </Link>
+                        <Link className="sidebar-btn" to="/admins"  >
+                          <FaUsers /> Admins
+                        </Link>
+                        <Link
+                          className="sidebar-btn"
+                          to="/parents" 
+                          
+                        >
+                          <FaChalkboardTeacher /> Parents
+                        </Link>
+                        <Link className="sidebar-btn" to="/marks" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}>
+                          <FaClipboardCheck /> Marks
+                        </Link>
+                        <Link className="sidebar-btn" to="/attendance">
+                          <FaUsers /> Attendance
+                        </Link>
+                        <Link className="sidebar-btn" to="/settings">
+                          <FaCog /> Settings
+                        </Link>
+                        <button className="sidebar-btn logout-btn" onClick={handleLogout}>
+                          <FaSignOutAlt /> Logout
+                        </button>
+                      </div>
+                    </div>
       {/* MAIN CONTENT */}
       <div style={{ marginLeft: "300px", marginRight: "250px", paddingTop: "80px", display: "flex", justifyContent: "center", width: "100%" }}>
         <div style={{ width: "900px" }}>
@@ -617,6 +660,7 @@ Object.entries(marksData).forEach(([courseId, studentsInCourse]) => {
 </div>
 
 
+    </div>
     </div>
   );
 }

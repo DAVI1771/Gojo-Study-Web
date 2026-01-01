@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
-import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell, FaUsers, FaClipboardCheck, FaStar, FaCheckCircle, FaTimesCircle } from "react-icons/fa";
+import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell, FaUsers, FaClipboardCheck, FaStar, FaCheckCircle, FaTimesCircle, FaFacebookMessenger, FaCommentDots } from "react-icons/fa";
 import "../styles/global.css";
 
 const StudentItem = ({ student, selected, onClick }) => (
@@ -56,7 +56,7 @@ function StudentsPage() {
   const [teacherInfo, setTeacherInfo] = useState(null);
   const [attendanceData, setAttendanceData] = useState([]);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
-  const navigate = useNavigate();
+  const [chatOpen, setChatOpen] = useState(false);
   const [attendanceFilter, setAttendanceFilter] = useState("daily");
   const [assignmentsData, setAssignmentsData] = useState({});
   const [teachersData, setTeachersData] = useState({});
@@ -67,8 +67,24 @@ function StudentsPage() {
   const [savingNote, setSavingNote] = useState(false);
   const teacherUserId = teacherInfo?.userId; // ✅ teacher ID from logged-in teacher
   const [marksData, setMarksData] = useState({});
+ 
+  const [teacher, setTeacher] = useState(null);
+
+  const [messages, setMessages] = useState([]);
+  const [newMessageText, setNewMessageText] = useState("");
+  const messagesEndRef = useRef(null);
 
 
+const navigate = useNavigate();
+
+useEffect(() => {
+  const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
+  if (!storedTeacher) {
+    navigate("/login"); // redirect if not logged in
+    return;
+  }
+  setTeacher(storedTeacher);
+}, []);
 
 
   // ---------------- LOAD TEACHER INFO ----------------
@@ -154,6 +170,12 @@ useEffect(() => {
 }, [teacherInfo]);
 
 
+useEffect(() => {
+  const chatContainer = document.querySelector(".chat-messages");
+  if (chatContainer) {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+}, [popupMessages]);
 
 
   useEffect(() => {
@@ -224,6 +246,11 @@ useEffect(() => {
   fetchAttendance();
 }, [selectedStudent]);
 
+const handleLogout = () => {
+    localStorage.removeItem("teacher"); // or "user", depending on your auth
+    navigate("/login");
+  };
+
 
 // ---------------- FILTERED ATTENDANCE ----------------
   const filteredAttendance = attendanceData.filter(a => {
@@ -284,7 +311,7 @@ useEffect(() => {
   async function fetchTeacherNotes() {
     try {
       const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentNotes/${selectedStudent.userId}.json`
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentNotes/${selectedStudent?.userId}.json`
       );
 
       if (!res.data) {
@@ -326,7 +353,7 @@ const saveTeacherNote = async () => {
 
   try {
     await axios.post(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentNotes/${selectedStudent.userId}.json`,
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/StudentNotes/${selectedStudent?.userId}.json`,
       noteData
     );
 
@@ -339,51 +366,102 @@ const saveTeacherNote = async () => {
   }
 };
 
+// Scroll chat to bottom when messages change
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-
-
-  // ---------------- FETCH MESSAGES ----------------
   useEffect(() => {
-    if (!selectedStudent || !teacherUserId) return;
+    scrollToBottom();
+  }, [messages]);
 
-    async function fetchMessages() {
+
+
+
+ // Fetch messages for the selected student
+  useEffect(() => {
+    if (!selectedStudent) return;
+
+    const fetchMessages = async () => {
       try {
-        const key = `${teacherUserId}_${selectedStudent.userId}`;
-        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`);
-        const msgs = Object.values(res.data || {})
-          .map(m => ({ ...m, sender: m.senderId === teacherUserId ? "teacher" : "student" }))
-          .sort((a, b) => a.timeStamp - b.timeStamp);
-        setPopupMessages(msgs);
+        const chatKey =
+  (teacher?.userId ?? 0) < (selectedStudent?.userId ?? 0)
+    ? `${teacher?.userId}_${selectedStudent?.userId}`
+    : `${selectedStudent?.userId}_${teacher?.userId}`;
+
+
+        const res = await axios.get(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+        );
+
+        const msgs = res.data
+          ? Object.entries(res.data).map(([id, msg]) => ({
+              messageId: id,
+              ...msg,
+            }))
+          : [];
+
+        // Sort messages by timestamp
+        msgs.sort((a, b) => a.timeStamp - b.timeStamp);
+
+        setMessages(msgs);
       } catch (err) {
-        console.error(err);
-        setPopupMessages([]);
+        console.error("Failed to fetch messages:", err);
+        setMessages([]);
       }
-    }
-
-    fetchMessages();
-  }, [selectedStudent, teacherUserId]);
-
-  // ---------------- SEND MESSAGE ----------------
-  const handleSendMessage = async () => {
-    if (!popupInput.trim() || !teacherUserId) return;
-
-    const newMessage = {
-      senderId: teacherUserId,
-      receiverId: selectedStudent.userId,
-      text: popupInput,
-      timeStamp: Date.now(),
-      seen: "false",
     };
 
+    fetchMessages();
+
+    // Optional: poll every 5 seconds to get new messages
+    const interval = setInterval(fetchMessages, 5000);
+    return () => clearInterval(interval);
+  }, [selectedStudent, teacher?.userId]);
+
+  // Send message
+  const sendMessage = async (text) => {
+    if (!text.trim() || !selectedStudent) return;
+
+    const newMessage = {
+      senderId: teacher?.userId,
+      receiverId: selectedStudent?.userId,
+      text: text.trim(),
+      timeStamp: Date.now(),
+      seen: false,
+    };
+
+    const chatKey =
+  (teacher?.userId ?? 0) < (selectedStudent?.userId ?? 0)
+    ? `${teacher?.userId}_${selectedStudent?.userId}`
+    : `${selectedStudent?.userId}_${teacher?.userId}`;
+
     try {
-      const key = `${teacherUserId}_${selectedStudent.userId}`;
-      await axios.post(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`, newMessage);
-      setPopupMessages([...popupMessages, { ...newMessage, sender: "teacher" }]);
-      setPopupInput("");
+      const res = await axios.post(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+        newMessage
+      );
+
+      // Add message locally
+      setMessages((prev) => [
+        ...prev,
+        { ...newMessage, messageId: res.data.name },
+      ]);
+      setNewMessageText("");
+      scrollToBottom();
     } catch (err) {
-      console.error(err);
+      console.error("Failed to send message:", err);
     }
   };
+
+
+
+
+useEffect(() => {
+  const chatContainer = document.querySelector(".chat-messages");
+  if (chatContainer) {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+}, [popupMessages]);
 
 
 const InfoRow = ({ label, value }) => (
@@ -427,49 +505,76 @@ const InfoRow = ({ label, value }) => (
 
   return (
     <div className="dashboard-page">
-      {/* TOP NAVBAR */}
-      <nav className="top-navbar">
-        <h2>Teacher Dashboard</h2>
-        <div className="nav-right" style={{ display: "flex", gap: "15px" }}>
-          <FaSearch />
-          <FaBell />
-          <FaCog />
-        </div>
-      </nav>
-
-      <div className="google-dashboard" style={{ display: "flex" }}>
-        {/* SIDEBAR */}
-        <div className="google-sidebar">
-          {teacherInfo && (
-            <div style={{ textAlign: "center", padding: "20px", borderBottom: "1px solid #ddd" }}>
-              <div style={{ width: "80px", height: "80px", margin: "0 auto 10px", borderRadius: "50%", overflow: "hidden", border: "3px solid #4b6cb7" }}>
-                <img src={teacherInfo.profileImage || "/default-profile.png"} alt={teacherInfo.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              </div>
-              <h3 style={{ margin: "5px 0", fontSize: "18px" }}>{teacherInfo.name}</h3>
-              <p style={{ fontSize: "14px", color: "#555" }}>{teacherInfo.username || teacherInfo.email}</p>
+          {/* Top Navbar */}
+          <nav className="top-navbar">
+            <h2>Gojo Dashboard</h2>
+            <div className="nav-search">
+              <FaSearch className="search-icon" />
+              <input type="text" placeholder="Search Teacher and Student..." />
             </div>
-          )}
+            <div className="nav-right">
+              <div className="icon-circle"><FaBell /></div>
+              <div className="icon-circle"><FaFacebookMessenger /></div>
+              <div className="icon-circle"><FaCog /></div>
+              
 
-          <div className="sidebar-menu">
-             <Link className="sidebar-btn" to="/dashboard" ><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/notes" ><FaClipboardCheck /> Notes</Link>
-            
-            <Link className="sidebar-btn" to="/students" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaUsers /> Students</Link>
-              <Link className="sidebar-btn" to="/admins" ><FaUsers /> Admins</Link>
-            <Link
-                     className="sidebar-btn"
-                     to="/marks"
-                     
-                   ><FaClipboardCheck />
-                     Marks
-                   </Link>
-                   <Link to="/attendance" className="sidebar-btn">
-                                                        <FaUsers /> Attendance
-                                                      </Link>
-            <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
-            <Link className="sidebar-btn" to="/logout"><FaSignOutAlt /> Logout</Link>
-          </div>
-        </div>
+      <img src={teacher?.profileImage || "/default-profile.png"} />
+
+            </div>
+          </nav>
+    
+          <div className="google-dashboard">
+            {/* Sidebar */}
+            <div className="google-sidebar">
+          {teacher && (
+  <div className="sidebar-profile">
+    <div className="sidebar-img-circle">
+      <img src={teacher.profileImage || "/default-profile.png"} alt="profile" />
+    </div>
+    <h3>{teacher.name}</h3>
+    <p>{teacher.username}</p>
+  </div>
+)}
+
+              <div className="sidebar-menu">
+                <Link
+                  className="sidebar-btn"
+                  to="/dashboard"
+                
+                >
+                  <FaHome /> Home
+                </Link>
+                <Link className="sidebar-btn" to="/notes">
+                  <FaClipboardCheck /> Notes
+                </Link>
+                <Link className="sidebar-btn" to="/students"   style={{ backgroundColor: "#4b6cb7", color: "#fff" }}>
+                  <FaUsers /> Students
+                </Link>
+                <Link className="sidebar-btn" to="/admins">
+                  <FaUsers /> Admins
+                </Link>
+                <Link
+                  className="sidebar-btn"
+                  to="/parents"
+                  
+                >
+                  <FaChalkboardTeacher /> Parents
+                </Link>
+                <Link className="sidebar-btn" to="/marks">
+                  <FaClipboardCheck /> Marks
+                </Link>
+                <Link className="sidebar-btn" to="/attendance">
+                  <FaUsers /> Attendance
+                </Link>
+                <Link className="sidebar-btn" to="/settings">
+                  <FaCog /> Settings
+                </Link>
+                <button className="sidebar-btn logout-btn" onClick={handleLogout}>
+                  <FaSignOutAlt /> Logout
+                </button>
+              </div>
+            </div>
+    
 
         {/* MAIN CONTENT */}
         <div style={{ flex: 1, display: "flex", justifyContent: "center", padding: "30px" }}>
@@ -627,7 +732,7 @@ const InfoRow = ({ label, value }) => (
     <InfoRow label="Section" value={selectedStudent.section} />
 
     <InfoRow label="Age" value={selectedStudent.age || "N/A"} />
-    <InfoRow label="Student ID" value={selectedStudent.userId} />
+    <InfoRow label="Student ID" value={selectedStudent?.userId} />
 
     <InfoRow
       label="Enrollment Date"
@@ -872,152 +977,6 @@ const InfoRow = ({ label, value }) => (
       </div>
     )}
 
-    {/* Fixed Message Button */}
-    <div
-  style={{
-    position: "fixed",
-    bottom: "20px",
-    right: "35px",
-    width: "calc(30% - 70px)",
-    zIndex: 1000,
-  }}
->
-  <button
-    onClick={() => setStudentChatOpen(true)}
-    style={{
-      marginLeft: "360px",
-      width: "30%",
-      padding: "16px 0",
-      borderRadius: "50px",
-      background: "#4978e8ff",
-      backgroundSize: "600% 600%",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "800",
-      border: "none",
-      cursor: "pointer",
-      boxShadow:
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6ccfff inset",
-      position: "relative",
-      overflow: "hidden",
-      transition: "all 0.3s ease",
-      animation: "gradientShift 5s ease infinite",
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.transform = "scale(1.08) translateY(-2px)";
-      e.currentTarget.style.boxShadow =
-        "0 0 15px #4b6cb7, 0 0 30px #4b6cb7, 0 0 40px #3760b3ff inset";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = "scale(1) translateY(0)";
-      e.currentTarget.style.boxShadow =
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6fd6ff inset";
-    }}
-  >
-    <span
-      style={{
-        display: "inline-block",
-        position: "relative",
-        animation: "iconBounce 1.5s infinite",
-      }}
-    >
-      💬 Parent
-    </span>
-
-    {/* Gradient Animation Keyframes */}
-    <style>
-      {`
-        @keyframes gradientShift {
-          0% {background-position: 0% 50%;}
-          50% {background-position: 100% 50%;}
-          100% {background-position: 0% 50%;}
-        }
-        @keyframes iconBounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}
-    </style>
-  </button>
-</div>
-
-
-
-
-<div
-  style={{
-    position: "fixed",
-    bottom: "20px",
-    right: "35px",
-    width: "calc(30% - 70px)",
-    zIndex: 1000,
-  }}
->
-  <button
-    onClick={() => setStudentChatOpen(true)}
-    style={{
-      marginLeft: 0,
-      width: "30%",
-      padding: "16px 0",
-      borderRadius: "50px",
-      background: "#4978e8ff",
-      backgroundSize: "600% 600%",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "800",
-      border: "none",
-      cursor: "pointer",
-      boxShadow:
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6ccfff inset",
-      position: "relative",
-      overflow: "hidden",
-      transition: "all 0.3s ease",
-      animation: "gradientShift 5s ease infinite",
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.transform = "scale(1.08) translateY(-2px)";
-      e.currentTarget.style.boxShadow =
-        "0 0 15px #4b6cb7, 0 0 30px #4b6cb7, 0 0 40px #3760b3ff inset";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = "scale(1) translateY(0)";
-      e.currentTarget.style.boxShadow =
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6fd6ff inset";
-    }}
-  >
-    <span
-      style={{
-        display: "inline-block",
-        position: "relative",
-        animation: "iconBounce 1.5s infinite",
-      }}
-    >
-      💬 Message
-    </span>
-
-    {/* Gradient Animation Keyframes */}
-    <style>
-      {`
-        @keyframes gradientShift {
-          0% {background-position: 0% 50%;}
-          50% {background-position: 100% 50%;}
-          100% {background-position: 0% 50%;}
-        }
-        @keyframes iconBounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}
-    </style>
-  </button>
-</div>
-
-
-
-
-
-
-
 
   </div>
 )}
@@ -1161,74 +1120,8 @@ const InfoRow = ({ label, value }) => (
           </div>
         ))}
 
-     {/* Fixed Message Button */}
-    <div
-  style={{
-    position: "fixed",
-    bottom: "20px",
-    right: "35px",
-    width: "calc(30% - 70px)",
-    zIndex: 1000,
-  }}
->
-  <button
-    onClick={() => setStudentChatOpen(true)}
-    style={{
-      marginLeft: "360px",
-      width: "30%",
-      padding: "16px 0",
-      borderRadius: "50px",
-      background: "#4978e8ff",
-      backgroundSize: "600% 600%",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "800",
-      border: "none",
-      cursor: "pointer",
-      boxShadow:
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6ccfff inset",
-      position: "relative",
-      overflow: "hidden",
-      transition: "all 0.3s ease",
-      animation: "gradientShift 5s ease infinite",
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.transform = "scale(1.08) translateY(-2px)";
-      e.currentTarget.style.boxShadow =
-        "0 0 15px #4b6cb7, 0 0 30px #4b6cb7, 0 0 40px #3760b3ff inset";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = "scale(1) translateY(0)";
-      e.currentTarget.style.boxShadow =
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6fd6ff inset";
-    }}
-  >
-    <span
-      style={{
-        display: "inline-block",
-        position: "relative",
-        animation: "iconBounce 1.5s infinite",
-      }}
-    >
-      💬 Message
-    </span>
+  
 
-    {/* Gradient Animation Keyframes */}
-    <style>
-      {`
-        @keyframes gradientShift {
-          0% {background-position: 0% 50%;}
-          50% {background-position: 100% 50%;}
-          100% {background-position: 0% 50%;}
-        }
-        @keyframes iconBounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}
-    </style>
-  </button>
-</div>
   </div>
 )}
 
@@ -1451,107 +1344,208 @@ const InfoRow = ({ label, value }) => (
             )}
           </div>
 
-          {/* Fixed Message Button */}
-    <div
-  style={{
-    position: "fixed",
-    bottom: "20px",
-    right: "35px",
-    width: "calc(30% - 70px)",
-    zIndex: 1000,
-  }}
->
-  <button
-    onClick={() => setStudentChatOpen(true)}
-    style={{
-      marginLeft: "360px",
-      width: "30%",
-      padding: "16px 0",
-      borderRadius: "50px",
-      background: "#4978e8ff",
-      backgroundSize: "600% 600%",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "800",
-      border: "none",
-      cursor: "pointer",
-      boxShadow:
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6ccfff inset",
-      position: "relative",
-      overflow: "hidden",
-      transition: "all 0.3s ease",
-      animation: "gradientShift 5s ease infinite",
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.transform = "scale(1.08) translateY(-2px)";
-      e.currentTarget.style.boxShadow =
-        "0 0 15px #4b6cb7, 0 0 30px #4b6cb7, 0 0 40px #3760b3ff inset";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = "scale(1) translateY(0)";
-      e.currentTarget.style.boxShadow =
-        "0 0 10px #4b6cb7, 0 0 20px #4b6cb7, 0 0 30px #3b6fd6ff inset";
-    }}
-  >
-    <span
-      style={{
-        display: "inline-block",
-        position: "relative",
-        animation: "iconBounce 1.5s infinite",
-      }}
-    >
-      💬 Message
-    </span>
-
-    {/* Gradient Animation Keyframes */}
-    <style>
-      {`
-        @keyframes gradientShift {
-          0% {background-position: 0% 50%;}
-          50% {background-position: 100% 50%;}
-          100% {background-position: 0% 50%;}
-        }
-        @keyframes iconBounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}
-    </style>
-  </button>
-</div>
-
+        
 
         </div>
       )}
     </div>
+
+
+
+ {/* Chat Button */}
+      {!chatOpen && (
+        <div
+          onClick={() => setChatOpen(true)}
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            width: "50px",
+            height: "50px",
+            background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#fff",
+            cursor: "pointer",
+            zIndex: 1000,
+            boxShadow: "0 8px 18px rgba(0,0,0,0.25)",
+            transition: "transform 0.2s ease",
+          }}
+        >
+          <FaCommentDots size={24} />
+        </div>
+      )}
+
+ 
+
+   {/* Chat Popup */}
+      {chatOpen && selectedStudent && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            width: "360px",
+            height: "480px",
+            background: "#fff",
+            borderRadius: "16px",
+            boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
+            zIndex: 2000,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {/* HEADER */}
+          <div
+            style={{
+              padding: "14px",
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#fafafa",
+            }}
+          >
+            <strong>{selectedStudent.name}</strong>
+
+            <div style={{ display: "flex", gap: "10px" }}>
+              {/* Expand */}
+              <button
+                onClick={() => {
+                  setChatOpen(false);
+                  navigate("/all-chat", { state: { user: selectedStudent } });
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                }}
+              >
+                ⤢
+              </button>
+
+              {/* Close */}
+              <button
+                onClick={() => setChatOpen(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: "20px",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div
+            style={{
+              flex: 1,
+              padding: "12px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              background: "#f9f9f9",
+            }}
+          >
+            {messages.length === 0 ? (
+              <p style={{ textAlign: "center", color: "#aaa" }}>
+                Start chatting with {selectedStudent.name}
+              </p>
+            ) : (
+              messages.map((m) => (
+                <div
+                  key={m.messageId}
+                  style={{
+                    display: "flex",
+                    justifyContent:
+                      m.senderId === teacher?.userId ? "flex-end" : "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "8px 14px",
+                      borderRadius: "20px",
+                      background:
+                        m.senderId === teacher?.userId ? "#4b6cb7" : "#e5e5ea",
+                      color: m.senderId === teacher?.userId ? "#fff" : "#000",
+                      maxWidth: "70%",
+                      wordWrap: "break-word",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {m.text}
+                  </span>
+                </div>
+              ))
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div
+            style={{
+              padding: "10px",
+              borderTop: "1px solid #eee",
+              display: "flex",
+              gap: "8px",
+              background: "#fff",
+            }}
+          >
+            <input
+              value={newMessageText}
+              onChange={(e) => setNewMessageText(e.target.value)}
+              placeholder="Type a message..."
+              style={{
+                flex: 1,
+                padding: "10px 14px",
+                borderRadius: "999px",
+                border: "1px solid #ccc",
+                outline: "none",
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") sendMessage(newMessageText);
+              }}
+            />
+            <button
+              onClick={() => sendMessage(newMessageText)}
+              style={{
+                background:
+                  "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+                border: "none",
+                borderRadius: "50%",
+                width: "42px",
+                height: "42px",
+                color: "#fff",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "18px",
+              }}
+            >
+              ➤
+            </button>
+          </div>
+        </div>
+      )}
+
+
+
+
+
   </div>
 )}
 
 
-          {/* CHAT POPUP */}
-          {studentChatOpen && selectedStudent && (
-            <div style={{ position: "fixed", bottom: "6px", width: "320px", background: "#fff", borderRadius: "12px", boxShadow: "0 8px 25px rgba(0,0,0,0.15)", padding: "15px", zIndex: 999, right: "22px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #ddd", paddingBottom: "10px" }}>
-                <strong>{selectedStudent.name}</strong>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button onClick={() => navigate("/teacher-chat", { state: { studentId: selectedStudent.userId, userType: "student" } })} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer" }}>↗</button>
-                  <button onClick={() => setStudentChatOpen(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}>×</button>
-                </div>
-              </div>
-              <div style={{ height: "260px", overflowY: "auto", padding: "10px" }}>
-                {popupMessages.length === 0 ? <p style={{ color: "#aaa", textAlign: "center" }}>No messages yet</p> :
-                  popupMessages.map((msg, i) => (
-                    <div key={i} style={{ marginBottom: "10px", textAlign: msg.sender === "teacher" ? "right" : "left" }}>
-                      <span style={{ background: msg.sender === "teacher" ? "#4b6cb7" : "#eee", color: msg.sender === "teacher" ? "#fff" : "#000", padding: "6px 12px", borderRadius: "12px", display: "inline-block" }}>{msg.text}</span>
-                    </div>
-                  ))}
-              </div>
-              <div style={{ display: "flex", marginTop: "8px", gap: "5px" }}>
-                <input type="text" value={popupInput} onChange={e => setPopupInput(e.target.value)} placeholder="Type a message..." style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }} />
-                <button onClick={handleSendMessage} style={{ padding: "8px 12px", background: "#4b6cb7", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer" }}>Send</button>
-              </div>
-            </div>
-          )}
 
         </div>
       </div>

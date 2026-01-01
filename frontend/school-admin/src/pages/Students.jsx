@@ -40,12 +40,80 @@ const [unreadSenders, setUnreadSenders] = useState([]);
 const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
+const [postNotifications, setPostNotifications] = useState([]);
+const [showPostDropdown, setShowPostDropdown] = useState(false);
 
+
+const adminId = admin.userId;
 
 
 const adminUserId = admin.userId;
 
 const db = getDatabase(app);
+
+
+const fetchPostNotifications = async () => {
+  try {
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
+
+    const notifications = (res.data || []).map(n => ({
+      ...n,
+      notificationId: n.notificationId || n.id
+    }));
+
+    setPostNotifications(notifications);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+  }
+};
+
+useEffect(() => {
+  if (!adminId) return;
+
+  fetchPostNotifications();
+  const interval = setInterval(fetchPostNotifications, 5000);
+
+  return () => clearInterval(interval);
+}, [adminId]);
+
+const handleNotificationClick = async (notification) => {
+  // Mark as read in backend
+  await axios.post(
+    "http://127.0.0.1:5000/api/mark_post_notification_read",
+    { notificationId: notification.notificationId }
+  );
+
+  // Remove from UI
+  setPostNotifications(prev =>
+    prev.filter(n => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // Navigate to dashboard with postId
+  navigate("/dashboard", {
+    state: { postId: notification.postId }
+  });
+};
+
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".notification-dropdown")
+    ) {
+      setShowPostDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+
 
 useEffect(() => {
   const fetchStudents = async () => {
@@ -530,6 +598,40 @@ const attendanceStats = useMemo(() => {
   return { total, present, absent, percent, streak };
 }, [selectedStudent]);
 
+
+const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
+
+
+
   return (
     <div className="dashboard-page">
 
@@ -541,7 +643,90 @@ const attendanceStats = useMemo(() => {
           <input type="text" placeholder="Search Teacher and Student..." />
         </div>
         <div className="nav-right">
-          <div className="icon-circle"><FaBell /></div>
+          <div
+  className="icon-circle"
+  style={{ position: "relative", cursor: "pointer" }}
+  onClick={(e) => {
+    e.stopPropagation();
+    setShowPostDropdown(prev => !prev);
+  }}
+>
+  <FaBell />
+
+  {/* 🔴 Notification Count */}
+  {postNotifications.length > 0 && (
+    <span
+      style={{
+        position: "absolute",
+        top: "-5px",
+        right: "-5px",
+        background: "red",
+        color: "#fff",
+        borderRadius: "50%",
+        padding: "2px 6px",
+        fontSize: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      {postNotifications.length}
+    </span>
+  )}
+
+  {/* 🔔 Notification Dropdown */}
+  {showPostDropdown && (
+    <div
+      className="notification-dropdown"
+      style={{
+        position: "absolute",
+        top: "40px",
+        right: "0",
+        width: "350px",
+        maxHeight: "400px",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: "10px",
+        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+        zIndex: 1000
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {postNotifications.length === 0 ? (
+        <p style={{ padding: "12px", textAlign: "center" }}>
+          No new notifications
+        </p>
+      ) : (
+        postNotifications.map(n => (
+          <div
+            key={n.notificationId}
+            style={{
+              display: "flex",
+              gap: "10px",
+              padding: "10px",
+              cursor: "pointer",
+              borderBottom: "1px solid #eee"
+            }}
+            onClick={() => handleNotificationClick(n)}
+          >
+            <img
+              src={n.adminProfile || "/default-profile.png"}
+              alt={n.adminName}
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%"
+              }}
+            />
+            <div>
+              <strong>{n.adminName}</strong>
+              <p style={{ margin: 0 }}>{n.message}</p>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )}
+</div>
+
     {/* ================= MESSENGER ================= */}
     <div
       className="icon-circle"
@@ -602,20 +787,32 @@ const attendanceStats = useMemo(() => {
                   cursor: "pointer",
                   borderBottom: "1px solid #eee"
                 }}
-               onClick={() => {
-      setShowMessageDropdown(false);
-    
-      // Build full user object expected by AllChat
-      const user = {
+              onClick={async () => {
+  setShowMessageDropdown(false);
+
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
+
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
+  navigate("/all-chat", {
+    state: {
+      user: {
         userId,
         name: sender.name,
-        profileImage: sender.profileImage
-      };
-    
-      navigate("/all-chat", {
-        state: { user }
-      });
-    }}
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
+  });
+}}
+
     
     
               >
@@ -694,7 +891,7 @@ const attendanceStats = useMemo(() => {
         </div>
 
         {/* ---------------- MAIN CONTENT ---------------- */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
           <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Students</h2>
 
           {/* Grade Filter */}
@@ -715,7 +912,7 @@ const attendanceStats = useMemo(() => {
 
           {/* Section Filter */}
           {selectedGrade !== "All" && sections.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px", }}>
               {["All", ...sections].map(section => (
                 <button key={section} onClick={() => setSelectedSection(section)} style={{
                   padding: "8px 16px",
@@ -741,8 +938,8 @@ const attendanceStats = useMemo(() => {
     key={s.userId}
     onClick={() => handleSelectStudent(s)}
     style={{
-      width: "500px",
-      height: "70px",
+      width: "700px",
+      height: "100px",
       borderRadius: "12px",
       padding: "15px",
       background: selectedStudent?.studentId === s.studentId ? "#e0e7ff" : "#fff",

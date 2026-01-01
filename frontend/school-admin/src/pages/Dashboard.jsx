@@ -6,6 +6,7 @@ import { AiFillPicture, AiFillVideoCamera } from "react-icons/ai";
 import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaBell,  FaSearch, FaFacebookMessenger, FaCalendarAlt, FaHeart, FaRegHeart   } from "react-icons/fa";
 import { Link } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
 
 
@@ -36,15 +37,28 @@ const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
 const [unreadSenders, setUnreadSenders] = useState({}); 
 // All unread messages from any sender type
-
-
+// Correct order
+const location = useLocation();
+const scrollToPostId = location.state?.scrollToPostId;
+const postIdToScroll = location.state?.postId;
+const postId = location.state?.postId;
 
 
 const adminUserId = admin.userId;
-
+const [showPostDropdown, setShowPostDropdown] = useState(false);
+const [unreadPostList, setUnreadPostList] = useState([]);
 
 const navigate = useNavigate();
 
+
+
+
+useEffect(() => {
+  if (postId) {
+    const element = document.getElementById(`post-${postId}`);
+    if (element) element.scrollIntoView({ behavior: "smooth" });
+  }
+}, [postId]);
   // ---------------- HELPER: LOAD ADMIN FROM LOCALSTORAGE ----------------
   const loadAdminFromStorage = () => {
     const storedAdmin = localStorage.getItem("admin");
@@ -62,6 +76,10 @@ const handleOpenChat = (user, userType) => {
     },
   });
 };
+
+
+
+
   // ---------------- FETCH POSTS ----------------
 const fetchPosts = async () => {
   try {
@@ -186,6 +204,8 @@ senders[p.userId] = {
   }
 };
 
+
+
   // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
 useEffect(() => {
   const closeDropdown = (e) => {
@@ -214,10 +234,6 @@ useEffect(() => {
 
 
 /// ---------------- FETCH POST NOTIFICATIONS ----------------
-
-
-const [showPostDropdown, setShowPostDropdown] = useState(false);
-const [unreadPostList, setUnreadPostList] = useState([]);
 
 
 
@@ -325,27 +341,58 @@ const openPostFromNotif = async (post) => {
   setShowPostDropdown(false);
 
   try {
-    // Mark post as seen in the backend
+    // 1️⃣ Mark as seen in backend
     await axios.post("http://127.0.0.1:5000/api/mark_post_seen", {
       postId: post.postId,
       userId: admin.userId
     });
 
-    // Remove this post from the unreadPostList immediately
-    setUnreadPostList(prev => prev.filter(p => p.postId !== post.postId));
+    // 2️⃣ REMOVE from notification list IMMEDIATELY
+    setUnreadPostList(prev =>
+      prev.filter(p => p.postId !== post.postId)
+    );
 
-    // Scroll to the post in the main feed
-    const el = document.getElementById(`post-${post.postId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth" });
-      el.style.backgroundColor = "#ffffcc";
-      setTimeout(() => (el.style.backgroundColor = ""), 2000);
-    }
+    // 3️⃣ Update post as seen in main feed
+    setPosts(prev =>
+      prev.map(p =>
+        p.postId === post.postId
+          ? {
+              ...p,
+              seenBy: {
+                ...(p.seenBy || {}),
+                [admin.userId]: true
+              }
+            }
+          : p
+      )
+    );
+
+    // 4️⃣ Scroll + highlight
+    setTimeout(() => {
+      const el = document.getElementById(`post-${post.postId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.style.backgroundColor = "#fff9c4";
+        setTimeout(() => (el.style.backgroundColor = ""), 1500);
+      }
+    }, 200);
+
   } catch (err) {
     console.error("Error opening post notification:", err);
   }
 };
 
+
+useEffect(() => {
+    if (postIdToScroll) {
+      const element = document.getElementById(`post-${postIdToScroll}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth" });
+        element.style.backgroundColor = "#ffffe0"; // optional highlight
+        setTimeout(() => (element.style.backgroundColor = ""), 2000);
+      }
+    }
+  }, [postIdToScroll]);
 
 
 
@@ -461,6 +508,39 @@ const handleLike = async (postId) => {
     }
   };
 
+
+const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
+
+
   return (
     <div className="dashboard-page">
 
@@ -469,6 +549,7 @@ const handleLike = async (postId) => {
 {/* ---------------- TOP NAVIGATION BAR ---------------- */}
 <nav className="top-navbar">
   <h2>Gojo Dashboard</h2>
+
 
   {/* Search Bar */}
   <div className="nav-search">
@@ -647,20 +728,32 @@ const handleLike = async (postId) => {
               cursor: "pointer",
               borderBottom: "1px solid #eee"
             }}
-           onClick={() => {
+           onClick={async () => {
   setShowMessageDropdown(false);
 
-  // Build full user object expected by AllChat
-  const user = {
-    userId,
-    name: sender.name,
-    profileImage: sender.profileImage
-  };
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
 
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
   navigate("/all-chat", {
-    state: { user }
+    state: {
+      user: {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
   });
 }}
+
 
 
           >
@@ -723,7 +816,7 @@ const handleLike = async (postId) => {
 
 
 
-
+<div className="app-layout">
       <div className="google-dashboard">
         {/* LEFT SIDEBAR — 25% */}
 
@@ -882,6 +975,7 @@ const handleLike = async (postId) => {
           </div>
 
         </div>
+      </div>
       </div>
     </div>
   );
