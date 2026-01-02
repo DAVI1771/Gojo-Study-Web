@@ -13,9 +13,84 @@ function Parent() {
   const [newMessageText, setNewMessageText] = useState("");
   const [parentInfo, setParentInfo] = useState(null);
   const [children, setChildren] = useState([]);
+  const [expandedChildren, setExpandedChildren] = useState({});
+  // At the top of your Parent component
+  const [expanded, setExpanded] = useState(false);
+const [unreadSenders, setUnreadSenders] = useState([]); 
+const [showMessageDropdown, setShowMessageDropdown] = useState(false);
+const [postNotifications, setPostNotifications] = useState([]);
+const [showPostDropdown, setShowPostDropdown] = useState(false);
 
+ const [messageDropdownVisible, setMessageDropdownVisible] = useState(false);
   const navigate = useNavigate();
   const admin = JSON.parse(localStorage.getItem("admin")) || {};
+
+
+const adminId = admin.userId;
+
+
+const fetchPostNotifications = async () => {
+  try {
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
+
+    const notifications = (res.data || []).map(n => ({
+      ...n,
+      notificationId: n.notificationId || n.id
+    }));
+
+    setPostNotifications(notifications);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+  }
+};
+
+useEffect(() => {
+  if (!adminId) return;
+
+  fetchPostNotifications();
+  const interval = setInterval(fetchPostNotifications, 5000);
+
+  return () => clearInterval(interval);
+}, [adminId]);
+
+const handleNotificationClick = async (notification) => {
+  // Mark as read in backend
+  await axios.post(
+    "http://127.0.0.1:5000/api/mark_post_notification_read",
+    { notificationId: notification.notificationId }
+  );
+
+  // Remove from UI
+  setPostNotifications(prev =>
+    prev.filter(n => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // Navigate to dashboard with postId
+  navigate("/dashboard", {
+    state: { postId: notification.postId }
+  });
+};
+
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".notification-dropdown")
+    ) {
+      setShowPostDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+
 
   // Fetch all parents from Users DB
   useEffect(() => {
@@ -37,6 +112,23 @@ function Parent() {
       }
     };
     fetchParents();
+  }, []);
+ const toggleDropdown = () => {
+    setShowMessageDropdown(prev => !prev);
+  };
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+
+  useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
   }, []);
 
   // Fetch parent info & children for selected parent
@@ -124,8 +216,149 @@ function Parent() {
 }, [selectedParent]);
 
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
 
 
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
+
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
+useEffect(() => {
+    const closeDropdown = (e) => {
+      // Optionally check if click is outside
+      setShowMessageDropdown(false);
+    };
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
 
   // Fetch chat messages
   useEffect(() => {
@@ -168,6 +401,38 @@ function Parent() {
     }
   };
 
+
+const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
+
   return (
     <div className="dashboard-page">
       {/* TOP NAVBAR */}
@@ -178,9 +443,208 @@ function Parent() {
           <input type="text" placeholder="Search Parents..." />
         </div>
         <div className="nav-right">
-          <div className="icon-circle"><FaBell /></div>
-          <div className="icon-circle"><FaFacebookMessenger /></div>
-          <div className="icon-circle"><FaCog /></div>
+          <div
+  className="icon-circle"
+  style={{ position: "relative", cursor: "pointer" }}
+  onClick={(e) => {
+    e.stopPropagation();
+    setShowPostDropdown(prev => !prev);
+  }}
+>
+  <FaBell />
+
+  {/* 🔴 Notification Count */}
+  {postNotifications.length > 0 && (
+    <span
+      style={{
+        position: "absolute",
+        top: "-5px",
+        right: "-5px",
+        background: "red",
+        color: "#fff",
+        borderRadius: "50%",
+        padding: "2px 6px",
+        fontSize: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      {postNotifications.length}
+    </span>
+  )}
+
+  {/* 🔔 Notification Dropdown */}
+  {showPostDropdown && (
+    <div
+      className="notification-dropdown"
+      style={{
+        position: "absolute",
+        top: "40px",
+        right: "0",
+        width: "350px",
+        maxHeight: "400px",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: "10px",
+        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+        zIndex: 1000
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {postNotifications.length === 0 ? (
+        <p style={{ padding: "12px", textAlign: "center" }}>
+          No new notifications
+        </p>
+      ) : (
+        postNotifications.map(n => (
+          <div
+            key={n.notificationId}
+            style={{
+              display: "flex",
+              gap: "10px",
+              padding: "10px",
+              cursor: "pointer",
+              borderBottom: "1px solid #eee"
+            }}
+            onClick={() => handleNotificationClick(n)}
+          >
+            <img
+              src={n.adminProfile || "/default-profile.png"}
+              alt={n.adminName}
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%"
+              }}
+            />
+            <div>
+              <strong>{n.adminName}</strong>
+              <p style={{ margin: 0 }}>{n.message}</p>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )}
+</div>
+
+
+
+
+          {/* ================= MESSENGER ================= */}
+          <div
+            className="icon-circle"
+            style={{ position: "relative", cursor: "pointer" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMessageDropdown((prev) => !prev);
+            }}
+          >
+            <FaFacebookMessenger />
+          
+            {/* 🔴 TOTAL UNREAD COUNT */}
+            {Object.keys(unreadSenders).length > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-5px",
+                  right: "-5px",
+                  background: "red",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  padding: "2px 6px",
+                  fontSize: "10px",
+                  fontWeight: "bold"
+                }}
+              >
+                {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+              </span>
+            )}
+          
+            {/* 📩 DROPDOWN */}
+            {showMessageDropdown && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "40px",
+                  right: "0",
+                  width: "300px",
+                  background: "#fff",
+                  borderRadius: "10px",
+                  boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+                  zIndex: 1000
+                }}
+              >
+                {Object.keys(unreadSenders).length === 0 ? (
+                  <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+                    No new messages
+                  </p>
+                ) : (
+                  Object.entries(unreadSenders).map(([userId, sender]) => (
+                    <div
+                      key={userId}
+                      style={{
+                        padding: "12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                        borderBottom: "1px solid #eee"
+                      }}
+                  onClick={async () => {
+  setShowMessageDropdown(false);
+
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
+
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
+  navigate("/all-chat", {
+    state: {
+      user: {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
+  });
+}}
+
+          
+          
+                    >
+                      <img
+                        src={sender.profileImage}
+                        alt={sender.name}
+                        style={{
+                          width: "42px",
+                          height: "42px",
+                          borderRadius: "50%"
+                        }}
+                      />
+                      <div>
+                        <strong>{sender.name}</strong>
+                        <p style={{ fontSize: "12px", margin: 0 }}>
+                          {sender.count} new message{sender.count > 1 && "s"}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          {/* ============== END MESSENGER ============== */}
+          
+           <Link className="icon-circle" to="/settings">
+                 <FaCog />
+               </Link>
           <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
         </div>
       </nav>
@@ -202,7 +666,7 @@ function Parent() {
             <Link className="sidebar-btn" to="/students"><FaChalkboardTeacher /> Students</Link>
             <Link className="sidebar-btn" to="/schedule"><FaCalendarAlt /> Schedule</Link>
             <Link className="sidebar-btn" to="/parents" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaChalkboardTeacher /> Parents</Link>
-            <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
+        
             <button className="sidebar-btn logout-btn" onClick={() => { localStorage.removeItem("admin"); window.location.href = "/login"; }}>
               <FaSignOutAlt /> Logout
             </button>
@@ -210,7 +674,7 @@ function Parent() {
         </div>
 
         {/* MAIN CONTENT */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
           <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Parents</h2>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
             {parents.length === 0 ? (
@@ -218,8 +682,8 @@ function Parent() {
             ) : (
               parents.map(p => (
                 <div key={p.userId} onClick={() => setSelectedParent(p)} style={{
-                  width: "500px",
-                  height: "70px",
+                  width: "700px",
+                  height: "100px",
                   borderRadius: "12px",
                   padding: "15px",
                   background: selectedParent?.userId === p.userId ? "#e0e7ff" : "#fff",
@@ -298,28 +762,209 @@ function Parent() {
                 )}
 
                 {/* CHILDREN TAB */}
-                {parentTab === "children" && (
-                  <div style={{ padding: "15px" }}>
-                    <h4 style={{ marginBottom: "10px", color: "#4b6cb7" }}>Children</h4>
-                    {children.length === 0 ? (
-                      <p>No children found</p>
-                    ) : (
-                      children.map(child => (
-                        <div key={child.studentId} style={{ display: "flex", alignItems: "center", padding: "12px", marginBottom: "10px", background: "#f8f9ff", borderRadius: "10px", boxShadow: "0 4px 10px rgba(0,0,0,0.05)", gap: "12px" }}>
-                          <img src={child.profileImage} alt={child.name} style={{ width: "50px", height: "50px", borderRadius: "50%", objectFit: "cover" }} />
-                          <div>
-                            <h3 style={{ margin: "0 0 5px 0" }}>{child.name}</h3>
-                            <p style={{ margin: "2px 0" }}>Email: {child.email}</p>
-                            <p style={{ margin: "2px 0" }}>Grade: {child.grade}</p>
-                            <p style={{ margin: "2px 0" }}>Section: {child.section}</p>
-                            <p style={{ margin: "2px 0" }}>Parent Phone: {child.parentPhone}</p>
-                            <p style={{ margin: "2px 0" }}>Relationship: {child.relationship}</p>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
+       {/* CHILDREN TAB */}
+{parentTab === "children" && (
+  <div style={{ padding: "30px" }}>
+    <h4 style={{ 
+      marginBottom: "30px", 
+      color: "#4b6cb7", 
+      fontSize: "26px", 
+      fontWeight: "700", 
+      borderBottom: "3px solid #4b6cb7", 
+      paddingBottom: "10px" 
+    }}>
+      Children
+    </h4>
+
+    {children.length === 0 ? (
+      <p style={{ color: "#777", fontStyle: "italic", textAlign: "center", fontSize: "16px" }}>
+        No children found
+      </p>
+    ) : (
+      <div 
+        style={{ 
+          display: "grid", 
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", 
+          gap: "25px" 
+        }}
+      >
+        {children.map(child => {
+          const isExpanded = expandedChildren[child.studentId] || false;
+
+          return (
+            <div
+  key={child.studentId}
+  style={{
+    background: "#ffffff",
+    borderRadius: "16px",
+    padding: "20px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+    transition: "0.3s",
+    borderLeft: "6px solid #4b6cb7"
+  }}
+>
+  {/* HEADER – IMAGE + NAME (HORIZONTAL) */}
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "16px",
+      marginBottom: "16px"
+    }}
+  >
+    <img
+      src={child.profileImage || "/default-profile.png"}
+      alt={child.name}
+      style={{
+        width: "64px",
+        height: "64px",
+        borderRadius: "50%",
+        objectFit: "cover",
+        border: "2px solid #4b6cb7"
+      }}
+    />
+
+    <div style={{ flex: 1 }}>
+      <h3
+        style={{
+          margin: 0,
+          fontSize: "18px",
+          fontWeight: "600",
+          color: "#1f2937"
+        }}
+      >
+        {child.name}
+      </h3>
+
+      <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+        <span
+          style={{
+            background: "#eef2ff",
+            color: "#4b6cb7",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "600"
+          }}
+        >
+          Grade {child.grade}
+        </span>
+
+        <span
+          style={{
+            background: "#f1f5f9",
+            color: "#334155",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "600"
+          }}
+        >
+          Section {child.section}
+        </span>
+      </div>
+    </div>
+
+    {/* TOGGLE BUTTON */}
+    <button
+      onClick={() =>
+        setExpandedChildren(prev => ({
+          ...prev,
+          [child.studentId]: !expandedChildren[child.studentId]
+        }))
+      }
+      style={{
+        padding: "8px 14px",
+        borderRadius: "10px",
+        border: "none",
+        background: expandedChildren[child.studentId] ? "#1e293b" : "#4b6cb7",
+        color: "#fff",
+        cursor: "pointer",
+        fontSize: "13px",
+        fontWeight: "600"
+      }}
+    >
+      {expandedChildren[child.studentId] ? "Hide" : "Details"}
+    </button>
+  </div>
+
+  {/* EXPANDED DETAILS */}
+  {expandedChildren[child.studentId] && (
+    <>
+      <div
+        style={{
+          borderTop: "1px solid #e5e7eb",
+          paddingTop: "12px",
+          fontSize: "14px",
+          color: "#475569",
+          lineHeight: "1.7"
+        }}
+      >
+        <p>
+          <strong>Email:</strong>{" "}
+          <a href={`mailto:${child.email}`} style={{ color: "#4b6cb7" }}>
+            {child.email}
+          </a>
+        </p>
+        <p>
+          <strong>Parent Phone:</strong>{" "}
+          <a href={`tel:${child.parentPhone}`} style={{ color: "#16a34a" }}>
+            {child.parentPhone}
+          </a>
+        </p>
+        <p>
+          <strong>Relationship:</strong> {child.relationship}
+        </p>
+      </div>
+
+      {/* ACTIONS */}
+      <div style={{ display: "flex", gap: "12px", marginTop: "14px" }}>
+        <a
+          href={`mailto:${child.email}`}
+          style={{
+            flex: 1,
+            textAlign: "center",
+            padding: "8px",
+            background: "#4b6cb7",
+            color: "#fff",
+            borderRadius: "10px",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: "600"
+          }}
+        >
+          Email
+        </a>
+        <a
+          href={`tel:${child.parentPhone}`}
+          style={{
+            flex: 1,
+            textAlign: "center",
+            padding: "8px",
+            background: "#16a34a",
+            color: "#fff",
+            borderRadius: "10px",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: "600"
+          }}
+        >
+          Call
+        </a>
+      </div>
+    </>
+  )}
+</div>
+
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+
+
+
 
                 {/* STATUS TAB */}
                 {parentTab === "status" && (

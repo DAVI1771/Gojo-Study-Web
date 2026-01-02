@@ -79,7 +79,7 @@
 /* Sidebar container */
 /* Sidebar container */
 .google-sidebar {
-  width: 300px; /* increased width */
+  width: 400px; /* increased width */
   height: 100vh; /* taller sidebar */
   padding: 80px 20px; /* more padding */
   background: #fff;
@@ -139,7 +139,10 @@
 .sidebar-menu {
   display: flex;
   flex-direction: column;
+  margin-top: -80px;
   width: 100%;
+  height: 80%; /* take more vertical space */
+  justify-content: center;
 }
 
 .sidebar-btn {
@@ -182,7 +185,7 @@
   font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
-  margin-top: 230px; /* pushes it to the bottom */
+  
 }
 
 .logout-btn:hover {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -9,7 +9,8 @@ import {
   FaSignOutAlt,
   FaBell,
   FaSearch,
-  FaHandHoldingMedical
+  FaHandHoldingMedical, FaChalkboardTeacher, FaFacebookMessenger,
+  FaCommentDots
 } from "react-icons/fa";
 import "../styles/global.css";
 
@@ -66,17 +67,26 @@ function AdminPage() {
   const [popupInput, setPopupInput] = useState("");
 
   const [teacherInfo, setTeacherInfo] = useState(null);
-  const navigate = useNavigate();
+ const [teacher, setTeacher] = useState(null);
 
-  // ---------------- LOAD TEACHER ----------------
-  useEffect(() => {
-    const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
-    if (!storedTeacher) {
-      navigate("/login");
-      return;
-    }
-    setTeacherInfo(storedTeacher);
-  }, [navigate]);
+  const messagesEndRef = useRef(null);
+  
+const navigate = useNavigate();
+
+useEffect(() => {
+  const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
+  if (!storedTeacher) {
+    navigate("/login"); // redirect if not logged in
+    return;
+  }
+  setTeacher(storedTeacher);
+}, []);
+
+ const handleLogout = () => {
+    localStorage.removeItem("teacher"); // or "user", depending on your auth
+    navigate("/login");
+  };
+
 
   // ---------------- FETCH ADMINS ----------------
   useEffect(() => {
@@ -108,44 +118,51 @@ function AdminPage() {
     fetchAdmins();
   }, []);
 
-  // ---------------- FETCH CHAT ----------------
+   // Scroll to bottom whenever messages update
   useEffect(() => {
-    if (!selectedAdmin || !teacherInfo) return;
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [popupMessages]);
+
+  // Fetch chat messages whenever selected admin changes
+  useEffect(() => {
+    if (!selectedAdmin || !teacher) return;
 
     async function fetchMessages() {
       try {
-        const key =
-          teacherInfo.userId < selectedAdmin.adminId
-            ? `${teacherInfo.userId}_${selectedAdmin.adminId}`
-            : `${teacherInfo.userId}_${selectedAdmin.adminId}`;
+        const chatKey =
+          teacher.userId < selectedAdmin.adminId
+            ? `${teacher.userId}_${selectedAdmin.adminId}`
+            : `${selectedAdmin.adminId}_${teacher.userId}`;
 
         const res = await axios.get(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
         );
 
         const msgs = Object.values(res.data || {})
-          .map(m => ({
+          .map((m) => ({
             ...m,
-            sender: m.senderId === teacherInfo.userId ? "teacher" : "admin"
+            sender: m.senderId === teacher.userId ? "teacher" : "admin",
           }))
           .sort((a, b) => a.timeStamp - b.timeStamp);
 
         setPopupMessages(msgs);
       } catch (err) {
-        console.error(err);
+        console.error("Failed to fetch messages:", err);
         setPopupMessages([]);
       }
     }
 
     fetchMessages();
-  }, [selectedAdmin, teacherInfo]);
+  }, [selectedAdmin, teacher]);
 
-  // ---------------- SEND MESSAGE ----------------
+  // Send message
   const handleSendMessage = async () => {
-    if (!popupInput.trim() || !teacherInfo || !selectedAdmin) return;
+    if (!popupInput.trim() || !teacher || !selectedAdmin) return;
 
     const newMessage = {
-      senderId: teacherInfo.userId,
+      senderId: teacher.userId,
       receiverId: selectedAdmin.adminId,
       text: popupInput,
       timeStamp: Date.now(),
@@ -153,59 +170,95 @@ function AdminPage() {
     };
 
     try {
-      const key =
-        teacherInfo.userId < selectedAdmin.adminId
-            ? `${teacherInfo.userId}_${selectedAdmin.adminId}`
-            : `${teacherInfo.userId}_${selectedAdmin.adminId}`;
+      const chatKey =
+        teacher.userId < selectedAdmin.adminId
+          ? `${teacher.userId}_${selectedAdmin.adminId}`
+          : `${selectedAdmin.adminId}_${teacher.userId}`;
 
       await axios.post(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`,
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
         newMessage
       );
 
+      // Update local state
       setPopupMessages([...popupMessages, { ...newMessage, sender: "teacher" }]);
       setPopupInput("");
     } catch (err) {
-      console.error(err);
+      console.error("Failed to send message:", err);
     }
   };
 
   return (
     <div className="dashboard-page">
-      {/* TOP NAV */}
-      <nav className="top-navbar">
-        <h2>Teacher Dashboard</h2>
-        <div style={{ display: "flex", gap: "15px" }}>
-          <FaSearch />
-          <FaBell />
-          <FaCog />
+              {/* Top Navbar */}
+              <nav className="top-navbar">
+                <h2>Gojo Dashboard</h2>
+                <div className="nav-search">
+                  <FaSearch className="search-icon" />
+                  <input type="text" placeholder="Search Teacher and Student..." />
+                </div>
+                <div className="nav-right">
+                  <div className="icon-circle"><FaBell /></div>
+                  <div className="icon-circle"><FaFacebookMessenger /></div>
+                  <div className="icon-circle"><FaCog /></div>
+                  
+    
+          <img src={teacher?.profileImage || "/default-profile.png"} />
+    
+                </div>
+              </nav>
+        
+              <div className="google-dashboard">
+                {/* Sidebar */}
+                <div className="google-sidebar">
+              {teacher && (
+      <div className="sidebar-profile">
+        <div className="sidebar-img-circle">
+          <img src={teacher.profileImage || "/default-profile.png"} alt="profile" />
         </div>
-      </nav>
-
-      <div className="google-dashboard" style={{ display: "flex" }}>
-        {/* LEFT SIDEBAR */}
-        <div className="google-sidebar">
-          {teacherInfo && (
-            <div style={{ textAlign: "center", padding: "20px", borderBottom: "1px solid #ddd" }}>
-              <div style={{ width: "80px", height: "80px", margin: "0 auto 10px", borderRadius: "50%", overflow: "hidden", border: "3px solid #4b6cb7" }}>
-                <img src={teacherInfo.profileImage || "/default-profile.png"} alt={teacherInfo.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              </div>
-              <h3>{teacherInfo.name}</h3>
-              <p>{teacherInfo.username || teacherInfo.email}</p>
-            </div>
-          )}
-
-          <div className="sidebar-menu">
-            <Link className="sidebar-btn" to="/dashboard"><FaHome /> Home</Link>
-            <Link className="sidebar-btn" to="/notes" ><FaClipboardCheck /> Notes</Link>
-            <Link className="sidebar-btn" to="/students"><FaUsers /> Students</Link>
-            <Link className="sidebar-btn" to="/admins" style={{ background: "#4b6cb7", color: "#fff" }}><FaUsers /> Admins</Link>
-            <Link className="sidebar-btn" to="/marks"><FaClipboardCheck /> Marks</Link>
-            <Link className="sidebar-btn" to="/attendance"><FaUsers /> Attendance</Link>
-            <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
-            <Link className="sidebar-btn" to="/logout"><FaSignOutAlt /> Logout</Link>
-          </div>
-        </div>
+        <h3>{teacher.name}</h3>
+        <p>{teacher.username}</p>
+      </div>
+    )}
+    
+                  <div className="sidebar-menu">
+                    <Link
+                      className="sidebar-btn"
+                      to="/dashboard"
+                  
+                    >
+                      <FaHome /> Home
+                    </Link>
+                    <Link className="sidebar-btn" to="/notes">
+                      <FaClipboardCheck /> Notes
+                    </Link>
+                    <Link className="sidebar-btn" to="/students">
+                      <FaUsers /> Students
+                    </Link>
+                    <Link className="sidebar-btn" to="/admins"  style={{ backgroundColor: "#4b6cb7", color: "#fff" }}>
+                      <FaUsers /> Admins
+                    </Link>
+                    <Link
+                      className="sidebar-btn"
+                      to="/parents"
+                      
+                    >
+                      <FaChalkboardTeacher /> Parents
+                    </Link>
+                    <Link className="sidebar-btn" to="/marks">
+                      <FaClipboardCheck /> Marks
+                    </Link>
+                    <Link className="sidebar-btn" to="/attendance">
+                      <FaUsers /> Attendance
+                    </Link>
+                    <Link className="sidebar-btn" to="/settings">
+                      <FaCog /> Settings
+                    </Link>
+                    <button className="sidebar-btn logout-btn" onClick={handleLogout}>
+                      <FaSignOutAlt /> Logout
+                    </button>
+                  </div>
+                </div>
 
         {/* MAIN */}
         <div style={{ flex: 1, display: "flex", justifyContent: "center", padding: "30px" }}>
@@ -268,43 +321,198 @@ function AdminPage() {
               {adminTab === "attendance" && <p>Attendance data here.</p>}
               {adminTab === "performance" && <p>Performance data here.</p>}
 
-              <div style={{ marginTop: "20px" }}>
-                <button onClick={() => setAdminChatOpen(true)} style={{ width: "20%", marginLeft: "200px", padding: "10px", background: "#4b6cb7", color: "#fff", border: "none", borderRadius: "8px" }}>
-                  Message
-                </button>
-              </div>
+              
+              
+             {/* Admin Chat Button */}
+{!adminChatOpen && selectedAdmin && (
+  <div
+    onClick={() => setAdminChatOpen(true)}
+    style={{
+      position: "fixed",
+      bottom: "20px",
+      right: "20px",
+      width: "50px",
+      height: "50px",
+      background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+      borderRadius: "50%",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "#fff",
+      cursor: "pointer",
+      zIndex: 1000,
+      boxShadow: "0 8px 18px rgba(0,0,0,0.25)",
+    }}
+  >
+    <FaCommentDots size={24} />
+  </div>
+)}
+
+{/* Admin Chat Popup */}
+{adminChatOpen && selectedAdmin && teacher && (
+  <div
+    style={{
+      position: "fixed",
+      bottom: "20px",
+      right: "20px",
+      width: "360px",
+      height: "480px",
+      background: "#fff",
+      borderRadius: "16px",
+      boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
+      zIndex: 2000,
+      display: "flex",
+      flexDirection: "column",
+      overflow: "hidden",
+    }}
+  >
+    {/* HEADER */}
+    <div
+      style={{
+        padding: "14px",
+        borderBottom: "1px solid #eee",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        background: "#fafafa",
+      }}
+    >
+      <strong>{selectedAdmin.name}</strong>
+      <div style={{ display: "flex", gap: "10px" }}>
+        {/* Expand */}
+        <button
+          onClick={() => {
+            setAdminChatOpen(false);
+            navigate("/all-chat", { state: { user: selectedAdmin } });
+          }}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "18px",
+          }}
+        >
+          ⤢
+        </button>
+
+        {/* Close */}
+        <button
+          onClick={() => setAdminChatOpen(false)}
+          style={{
+            background: "none",
+            border: "none",
+            fontSize: "20px",
+            cursor: "pointer",
+          }}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+
+    {/* MESSAGES */}
+    <div
+      style={{
+        flex: 1,
+        padding: "12px",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        background: "#f9f9f9",
+      }}
+    >
+      {popupMessages.length === 0 ? (
+        <p style={{ textAlign: "center", color: "#aaa" }}>
+          Start chatting with {selectedAdmin.name}
+        </p>
+      ) : (
+        popupMessages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              justifyContent:
+                m.senderId === teacher?.userId ? "flex-end" : "flex-start",
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                padding: "8px 14px",
+                borderRadius: "20px",
+                background:
+                  m.senderId === teacher?.userId ? "#4b6cb7" : "#e5e5ea",
+                color: m.senderId === teacher?.userId ? "#fff" : "#000",
+                maxWidth: "70%",
+                wordWrap: "break-word",
+              }}
+            >
+              {m.text}
+            </span>
+          </div>
+        ))
+      )}
+      <div ref={messagesEndRef} />
+    </div>
+
+    {/* INPUT */}
+    <div
+      style={{
+        padding: "10px",
+        borderTop: "1px solid #eee",
+        display: "flex",
+        gap: "8px",
+        background: "#fff",
+      }}
+    >
+      <input
+        value={popupInput}
+        onChange={(e) => setPopupInput(e.target.value)}
+        placeholder="Type a message..."
+        style={{
+          flex: 1,
+          padding: "10px 14px",
+          borderRadius: "999px",
+          border: "1px solid #ccc",
+          outline: "none",
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSendMessage();
+        }}
+      />
+      <button
+        onClick={handleSendMessage}
+        style={{
+          background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+          border: "none",
+          borderRadius: "50%",
+          width: "42px",
+          height: "42px",
+          color: "#fff",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "18px",
+        }}
+      >
+        ➤
+      </button>
+    </div>
+  </div>
+)}
+
+
+
+
+
             </div>
           )}
         </div>
       </div>
 
-      {/* CHAT POPUP */}
-      {adminChatOpen && selectedAdmin && (
-        <div style={{ position: "fixed", bottom: "6px", right: "22px", width: "320px", background: "#fff", borderRadius: "12px", boxShadow: "0 8px 25px rgba(0,0,0,0.15)", padding: "15px", zIndex: 999 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ddd", paddingBottom: "10px" }}>
-            <strong>{selectedAdmin.name}</strong>
-<button onClick={() => navigate("/teacher-chat", { state: { studentId: selectedStudent.userId, userType: "admin" } })} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", marginRight: "-170px" }}>↗</button>
-                  <button onClick={() => setStudentChatOpen(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}>×</button>         
-          </div>
 
-          <div style={{ height: "260px", overflowY: "auto", padding: "10px" }}>
-            {popupMessages.map((msg, i) => (
-              <div key={i} style={{ textAlign: msg.sender === "teacher" ? "right" : "left", marginBottom: "10px" }}>
-                <span style={{ background: msg.sender === "teacher" ? "#4b6cb7" : "#eee", color: msg.sender === "teacher" ? "#fff" : "#000", padding: "6px 12px", borderRadius: "12px" }}>
-                  {msg.text}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: "flex", gap: "5px" }}>
-            <input value={popupInput} onChange={e => setPopupInput(e.target.value)} style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid #ddd" }} />
-            <button onClick={handleSendMessage} style={{ background: "#4b6cb7", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 12px" }}>
-              Send
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -141,14 +141,18 @@ def create_post():
         post_ref = posts_ref.push()
         time_now = datetime.now().strftime("%I:%M %p, %b %d %Y")
         post_ref.set({
-            "postId": post_ref.key,
-            "message": text,
-            "postUrl": post_url,
-            "adminId": adminId,
-            "time": time_now,
-            "likeCount": 0,
-            "likes": {}
-        })
+    "postId": post_ref.key,
+    "message": text,
+    "postUrl": post_url,
+    "adminId": adminId,
+    "time": time_now,
+    "likeCount": 0,
+    "likes": {},
+    "seenBy": {
+        adminId: True  # creator has already seen it
+    }
+})
+
         return jsonify({"success": True, "message": "Post created successfully"})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
@@ -162,19 +166,50 @@ def get_posts():
     for key, post in all_posts.items():
         user_data = users_ref.child(post.get("adminId")).get() or {}
         post_list.append({
-            "postId": key,
-            "message": post.get("message"),
-            "postUrl": post.get("postUrl"),
-            "adminId": post.get("adminId"),
-            "adminName": post.get("adminName") or user_data.get("name", "Admin"),
-            "adminProfile": post.get("adminProfile") or user_data.get("profileImage", "/default-profile.png"),
-            "time": post.get("time"),
-            "likes": post.get("likes", {}),
-            "likeCount": post.get("likeCount", 0)
-        })
+    "postId": key,
+    "message": post.get("message"),
+    "postUrl": post.get("postUrl"),
+    "adminId": post.get("adminId"),
+    "adminName": post.get("adminName") or user_data.get("name", "Admin"),
+    "adminProfile": post.get("adminProfile") or user_data.get("profileImage", "/default-profile.png"),
+    "time": post.get("time"),
+    "likes": post.get("likes", {}),
+    "likeCount": post.get("likeCount", 0),
+    "seenBy": post.get("seenBy", {})   # 🔥 THIS LINE
+})
+
+
 
     post_list.reverse()
     return jsonify(post_list)
+
+@app.route("/api/mark_post_seen", methods=["POST"])
+def mark_post_seen():
+    try:
+        data = request.get_json(force=True)
+        postId = data.get("postId")
+        userId = data.get("userId")
+
+        if not postId or not userId:
+            return jsonify({"success": False, "message": "Invalid data"}), 400
+
+        post_ref = posts_ref.child(postId)
+        post_data = post_ref.get()
+
+        if not post_data:
+            return jsonify({"success": False, "message": "Post not found"}), 404
+
+        seen_by = post_data.get("seenBy", {})
+        seen_by[userId] = True
+
+        post_ref.update({"seenBy": seen_by})
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 
 # ---------------- ADMIN PROFILE ---------------- #
 @app.route("/api/admin/<adminId>", methods=["GET"])
@@ -210,6 +245,46 @@ def get_my_posts(adminId):
 
     my_posts.reverse()
     return jsonify(my_posts)
+
+# ---------------- GET POST NOTIFICATIONS ---------------- #
+@app.route("/api/get_post_notifications/<adminId>", methods=["GET"])
+def get_post_notifications(adminId):
+    try:
+        all_posts = posts_ref.get() or {}
+        notifications = []
+
+        for key, post in all_posts.items():
+            seen_by = post.get("seenBy", {})
+            # Only include posts the admin has NOT seen
+            if not seen_by.get(adminId):
+                # Fetch the admin/user who created this post
+                user_data = users_ref.child(post.get("adminId")).get() or {}
+                notifications.append({
+                    "postId": key,
+                    "message": post.get("message"),
+                    "postUrl": post.get("postUrl"),
+                    "adminId": post.get("adminId"),
+                    "adminName": user_data.get("name", "Admin"),  # Admin name
+                    "adminProfile": user_data.get("profileImage", "/default-profile.png"),  # Admin profile image
+                    "time": post.get("time"),
+                })
+
+        # Sort newest first
+        notifications.sort(key=lambda x: x['time'], reverse=True)
+        return jsonify(notifications)
+    
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/mark_post_notification_read", methods=["POST"])
+def mark_post_notification_read():
+    data = request.get_json()
+    notification_id = data.get("notificationId")
+    
+    # your logic here...
+    
+    return jsonify({"success": True}), 200  # 🔹 must return 200
+
 
 # ---------------- EDIT POST ---------------- #
 @app.route("/api/edit_post/<postId>", methods=["POST"])

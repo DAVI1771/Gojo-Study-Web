@@ -50,11 +50,19 @@ def register_student():
     users_ref = db.reference('Users')
     students_ref = db.reference('Students')
 
+   
+   
+
     # Check if username exists
     all_users = users_ref.get() or {}
     for user in all_users.values():
         if user.get('username') == username:
             return jsonify({'success': False, 'message': 'Username already exists!'})
+
+
+
+
+
 
     # Upload profile image
     profile_url = "/default-profile.png"
@@ -87,6 +95,9 @@ def register_student():
         'status': 'active'
     })
 
+
+   
+
     return jsonify({'success': True, 'message': 'Student registered successfully!'})
 
 # ===================== TEACHER REGISTRATION =====================
@@ -103,13 +114,33 @@ def register_teacher():
     courses_ref = db.reference('Courses')
     assignments_ref = db.reference('TeacherAssignments')
 
-    # Check if username exists
+    # ===================== USERNAME CHECK =====================
     all_users = users_ref.get() or {}
     for user in all_users.values():
         if user.get('username') == username:
-            return jsonify({'success': False, 'message': 'Username already exists!'})
+            return jsonify({
+                'success': False,
+                'message': 'Username already exists!'
+            })
 
-    # Upload profile image
+    # ===================== SUBJECT CONFLICT CHECK =====================
+    existing_assignments = assignments_ref.get() or {}
+
+    for course in courses:
+        grade = course['grade']
+        section = course['section']
+        subject = course['subject']
+
+        course_id = f"course_{subject.lower()}_{grade}{section.upper()}"
+
+        for assignment in existing_assignments.values():
+            if assignment.get('courseId') == course_id:
+                return jsonify({
+                    'success': False,
+                    'message': f'{subject} already assigned in Grade {grade}{section}'
+                })
+
+    # ===================== PROFILE UPLOAD =====================
     profile_url = "/default-profile.png"
     if profile_file:
         filename = f"teachers/{username}_{profile_file.filename}"
@@ -118,7 +149,7 @@ def register_teacher():
         blob.make_public()
         profile_url = blob.public_url
 
-    # Create user
+    # ===================== CREATE USER =====================
     new_user_ref = users_ref.push()
     user_data = {
         'userId': new_user_ref.key,
@@ -131,7 +162,7 @@ def register_teacher():
     }
     new_user_ref.set(user_data)
 
-    # Create teacher entry
+    # ===================== CREATE TEACHER =====================
     new_teacher_ref = teachers_ref.push()
     new_teacher_ref.set({
         'userId': new_user_ref.key,
@@ -139,11 +170,12 @@ def register_teacher():
         'profileImage': profile_url
     })
 
-    # Assign courses
+    # ===================== ASSIGN COURSES =====================
     for course in courses:
         grade = course['grade']
         section = course['section']
         subject = course['subject']
+
         course_id = f"course_{subject.lower()}_{grade}{section.upper()}"
 
         if not courses_ref.child(course_id).get():
@@ -154,8 +186,7 @@ def register_teacher():
                 'section': section
             })
 
-        assignment_ref = assignments_ref.push()
-        assignment_ref.set({
+        assignments_ref.push().set({
             'teacherId': new_teacher_ref.key,
             'courseId': course_id
         })
@@ -166,6 +197,7 @@ def register_teacher():
         'teacherKey': new_teacher_ref.key,
         'profileImage': profile_url
     })
+
 
 
 # ===================== TEACHER LOGIN =====================
@@ -380,19 +412,23 @@ def update_course_marks(course_id):
 @app.route("/api/get_posts", methods=["GET"])
 def get_posts():
     posts_ref = db.reference("Posts")
-    admins_ref = db.reference("School_Admins")
+    users_ref = db.reference("Users")
 
     all_posts = posts_ref.get() or {}
+    all_users = users_ref.get() or {}
+
     result = []
 
     for post_id, post in all_posts.items():
-        admin_id = post.get("adminId")
-        admin = admins_ref.child(admin_id).get() or {}
+        user_id = post.get("adminId")  # ⚠️ THIS IS userId
+
+        user = all_users.get(user_id, {})
+
         result.append({
             "postId": post_id,
-            "adminId": admin_id,
-            "adminName": admin.get("name", "Admin"),
-            "adminProfile": admin.get("profileImage", "/default-profile.png"),
+            "adminId": user_id,
+            "adminName": user.get("name", "Admin"),
+            "adminProfile": user.get("profileImage", "/default-profile.png"),
             "message": post.get("message", ""),
             "postUrl": post.get("postUrl"),
             "timestamp": post.get("time", ""),

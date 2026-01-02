@@ -7,6 +7,9 @@ import {
 import axios from "axios";
 import { format, parseISO, startOfWeek, startOfMonth } from "date-fns";
 import { useMemo } from "react";
+import { getDatabase, ref, onValue, push, update } from "firebase/database";
+import { getFirestore, collection, getDocs } from "firebase/firestore";
+import { app } from "../firebaseConfig"; // your firebase config file
 
 
 function StudentsPage() {
@@ -33,110 +36,167 @@ function StudentsPage() {
 
   const [teachers, setTeachers] = useState([]);
 const [unreadTeachers, setUnreadTeachers] = useState({});
-
+const [unreadSenders, setUnreadSenders] = useState([]); 
 const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
+const [postNotifications, setPostNotifications] = useState([]);
+const [showPostDropdown, setShowPostDropdown] = useState(false);
+
+
+const adminId = admin.userId;
+
 
 const adminUserId = admin.userId;
 
+const db = getDatabase(app);
+
+
+const fetchPostNotifications = async () => {
+  try {
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
+
+    const notifications = (res.data || []).map(n => ({
+      ...n,
+      notificationId: n.notificationId || n.id
+    }));
+
+    setPostNotifications(notifications);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+  }
+};
+
+useEffect(() => {
+  if (!adminId) return;
+
+  fetchPostNotifications();
+  const interval = setInterval(fetchPostNotifications, 5000);
+
+  return () => clearInterval(interval);
+}, [adminId]);
+
+const handleNotificationClick = async (notification) => {
+  // Mark as read in backend
+  await axios.post(
+    "http://127.0.0.1:5000/api/mark_post_notification_read",
+    { notificationId: notification.notificationId }
+  );
+
+  // Remove from UI
+  setPostNotifications(prev =>
+    prev.filter(n => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // Navigate to dashboard with postId
+  navigate("/dashboard", {
+    state: { postId: notification.postId }
+  });
+};
+
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".notification-dropdown")
+    ) {
+      setShowPostDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+
+
+useEffect(() => {
+  const fetchStudents = async () => {
+    const querySnapshot = await getDocs(collection(db, "students"));
+    const studentsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setStudents(studentsData);
+  };
+
+  fetchStudents();
+}, []);
+
+
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
 
 const handleSelectStudent = async (s) => {
   setLoading(true);
-
   try {
-    // 1️⃣ Fetch student info
-    const usersRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`
-    );
-    const user = usersRes.data || {};
+    // 1️⃣ Fetch user info
+    const userRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`);
+    const user = userRes.data || {};
 
     // 2️⃣ Fetch ClassMarks
-    const marksRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`
-    );
+    const marksRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`);
     const classMarks = marksRes.data || {};
 
-    // 3️⃣ Collect teacher IDs
-    const teacherIds = new Set();
-    Object.values(classMarks).forEach(course => {
-      if (course[s.userId]?.teacherId) {
-        teacherIds.add(course[s.userId].teacherId);
-      }
-    });
-
-    // 4️⃣ Fetch teacher names
-    const teacherMap = {};
-    await Promise.all([...teacherIds].map(async (tid) => {
-      const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${tid}.json`
-      );
-      teacherMap[tid] = res.data?.name || "Teacher";
-    }));
-
-    // 5️⃣ Build course → teacher map ✅
+    const studentMarks = {};
     const courseTeacherMap = {};
-    Object.keys(classMarks).forEach(courseId => {
-      const studentMark = classMarks[courseId][s.userId];
-      if (studentMark?.teacherId) {
-        courseTeacherMap[courseId] =
-          teacherMap[studentMark.teacherId];
+
+    Object.entries(classMarks).forEach(([courseId, studentsObj]) => {
+      const studentMark = studentsObj?.[s.studentId]; // <-- FIX HERE
+      if (studentMark) {
+        studentMarks[courseId] = {
+          mark20: Number(studentMark.mark20 || 0),
+          mark30: Number(studentMark.mark30 || 0),
+          mark50: Number(studentMark.mark50 || 0),
+          teacherName: studentMark.teacherName || "Teacher"
+        };
+        courseTeacherMap[courseId] = studentMark.teacherName || "Teacher";
       }
     });
 
-    // 6️⃣ Fetch Attendance (NOW teacher map exists ✅)
-    const attendanceRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`
-    );
+    // 3️⃣ Fetch Attendance (works the same)
+    const attendanceRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`);
     const attendanceRaw = attendanceRes.data || {};
-    const attendanceData = [];
 
-    Object.entries(attendanceRaw).forEach(([courseId, dates]) => {
-      Object.entries(dates || {}).forEach(([date, students]) => {
-        if (students[s.userId]) {
+    const attendanceData = [];
+    Object.entries(attendanceRaw).forEach(([courseId, datesObj]) => {
+      Object.entries(datesObj || {}).forEach(([date, studentsObj]) => {
+        const status = studentsObj?.[s.studentId]; // <-- FIX HERE
+        if (status) {
           attendanceData.push({
-            date,
             courseId,
-            status: students[s.userId],
+            date,
+            status,
             teacherName: courseTeacherMap[courseId] || "Teacher"
           });
         }
       });
     });
 
-
-
-
-
-
-
-
-    // 7️⃣ Build marks
-    const studentMarks = {};
-    Object.keys(classMarks).forEach(courseId => {
-      const m = classMarks[courseId][s.userId];
-      if (m) {
-        studentMarks[courseId] = {
-          mark20: m.mark20 || 0,
-          mark30: m.mark30 || 0,
-          mark50: m.mark50 || 0,
-          teacherName: teacherMap[m.teacherId]
-        };
-      }
-    });
-
-    // 8️⃣ Final set
+    // 4️⃣ Set selected student
     setSelectedStudent({
       ...s,
       ...user,
-      attendance: attendanceData,
-      marks: studentMarks
+      marks: studentMarks,
+      attendance: attendanceData
     });
 
   } catch (err) {
     console.error("Error fetching student data:", err);
   }
-
   setLoading(false);
 };
 
@@ -292,15 +352,17 @@ useEffect(() => {
     const map = {};
 
     for (const s of students) {
-      const key = `${s.userId}_${admin.userId}`;
+      const key = `${s.studentId}_${admin.userId}`;
+
       const res = await axios.get(
         `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
       );
 
       const msgs = res.data || {};
-      map[s.userId] = Object.values(msgs).some(
-        m => m.senderId === s.userId && m.seenByAdmin === false
-      );
+   map[s.studentId] = Object.values(msgs).some(
+  m => m.senderId === s.studentId && m.seenByAdmin === false
+);
+
     }
 
     setUnreadMap(map);
@@ -309,63 +371,210 @@ useEffect(() => {
   if (students.length > 0) fetchUnread();
 }, [students]);
 
-// ------------------ FETCH MESSAGES ------------------
-useEffect(() => {
-  if (studentChatOpen && selectedStudent) {
-    const key = `${selectedStudent.studentId}_${admin.userId}`;
+// ---------------- FETCH CHAT MESSAGES ----------------
+  useEffect(() => {
+    if (!studentChatOpen || !selectedStudent) return;
 
     const fetchMessages = async () => {
-      const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
-      );
-
-      const data = res.data || {};
-      const messages = Object.entries(data).map(([id, msg]) => ({ id, ...msg }));
-
-      setPopupMessages(messages);
-
-      // MARK STUDENT MESSAGES AS SEEN
-      messages.forEach((msg) => {
-        if (msg.senderId === selectedStudent.studentId && !msg.seenByAdmin) {
-          axios.patch(
-            `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages/${msg.id}.json`,
-            { seenByAdmin: true }
-          );
-        }
-      });
+      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+      try {
+        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+        const msgs = Object.values(res.data || {}).map(m => ({
+          ...m,
+          sender: m.senderId === adminUserId ? "admin" : "student"
+        })).sort((a, b) => a.timeStamp - b.timeStamp);
+        setPopupMessages(msgs);
+      } catch (err) {
+        console.error(err);
+        setPopupMessages([]);
+      }
     };
 
     fetchMessages();
-  }
-}, [studentChatOpen, selectedStudent]);
+  }, [studentChatOpen, selectedStudent, adminUserId]);
 
-// ------------------ SEND MESSAGE ------------------
-const handleSendMessage = async () => {
-  if (!popupInput.trim() || !selectedStudent) return;
-
-  const key = `${selectedStudent.studentId}_${admin.userId}`;
-  const newMessage = {
-    senderId: admin.userId,
-    receiverId: selectedStudent.studentId,
-    content: popupInput,
-    timeStamp: Date.now(),
-    edited: false,
-    seenByAdmin: true
+  // ---------------- SEND MESSAGE ----------------
+  const sendPopupMessage = async () => {
+    if (!popupInput.trim() || !selectedStudent) return;
+    const newMessage = {
+      senderId: adminUserId,
+      receiverId: selectedStudent.userId,
+      text: popupInput,
+      timeStamp: Date.now()
+    };
+    try {
+      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+      await axios.post(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, newMessage);
+      setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+      setPopupInput("");
+    } catch (err) {
+      console.error(err);
+    }
   };
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
   try {
-    const res = await axios.post(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`,
-      newMessage
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
+
+
+
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
+
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
+
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
+
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
+
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
     );
 
-    // Firebase returns name/key of the new message
-    setPopupMessages([...popupMessages, { id: res.data.name, ...newMessage }]);
-    setPopupInput("");
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
+
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
+      }
+    }
+
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
   } catch (err) {
-    console.error("Error sending message:", err);
+    console.error("Unread fetch failed:", err);
   }
 };
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
+
+
+  // ---------------- MARK MESSAGES AS SEEN ----------------
+  useEffect(() => {
+    if (!studentChatOpen || !selectedStudent) return;
+
+    const markSeen = async () => {
+      const chatKey = `${adminUserId}_${selectedStudent.userId}`;
+      try {
+        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+        const msgs = Object.entries(res.data || {});
+        const updates = {};
+        msgs.forEach(([key, msg]) => {
+          if (msg.receiverId === adminUserId && !msg.seen) updates[key + "/seen"] = true;
+        });
+        if (Object.keys(updates).length > 0) {
+          await axios.patch(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, updates);
+          setUnreadStudents(prev => ({ ...prev, [selectedStudent.userId]: 0 }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    markSeen();
+  }, [studentChatOpen, selectedStudent, adminUserId]);
+
+
+
 const attendanceStats = useMemo(() => {
   if (!selectedStudent?.attendance) return null;
 
@@ -389,6 +598,40 @@ const attendanceStats = useMemo(() => {
   return { total, present, absent, percent, streak };
 }, [selectedStudent]);
 
+
+const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
+
+
+
   return (
     <div className="dashboard-page">
 
@@ -400,94 +643,206 @@ const attendanceStats = useMemo(() => {
           <input type="text" placeholder="Search Teacher and Student..." />
         </div>
         <div className="nav-right">
-          <div className="icon-circle"><FaBell /></div>
-          <div 
-  className="icon-circle" 
+          <div
+  className="icon-circle"
   style={{ position: "relative", cursor: "pointer" }}
-  onClick={() => setShowMessageDropdown(prev => !prev)}
+  onClick={(e) => {
+    e.stopPropagation();
+    setShowPostDropdown(prev => !prev);
+  }}
 >
-  <FaFacebookMessenger />
-  {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) > 0 && (
-    <span style={{
-      position: "absolute",
-      top: "-5px",
-      right: "-5px",
-      background: "red",
-      color: "#fff",
-      borderRadius: "50%",
-      padding: "2px 6px",
-      fontSize: "10px",
-      fontWeight: "bold"
-    }}>
-      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0)}
+  <FaBell />
+
+  {/* 🔴 Notification Count */}
+  {postNotifications.length > 0 && (
+    <span
+      style={{
+        position: "absolute",
+        top: "-5px",
+        right: "-5px",
+        background: "red",
+        color: "#fff",
+        borderRadius: "50%",
+        padding: "2px 6px",
+        fontSize: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      {postNotifications.length}
     </span>
   )}
 
-  {showMessageDropdown && (
-    <div style={{
-      position: "absolute",
-      top: "35px",
-      right: "0",
-      width: "300px",
-      maxHeight: "400px",
-      overflowY: "auto",
-      background: "#fff",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      zIndex: 1000
-    }}>
-      {teachers.map(t => {
-        const msgs = popupMessages
-          .filter(m => m.senderId === t.userId || m.receiverId === t.userId)
-          .sort((a,b) => a.timeStamp - b.timeStamp);
-        const latestMsg = msgs[msgs.length - 1];
-
-        return (
+  {/* 🔔 Notification Dropdown */}
+  {showPostDropdown && (
+    <div
+      className="notification-dropdown"
+      style={{
+        position: "absolute",
+        top: "40px",
+        right: "0",
+        width: "350px",
+        maxHeight: "400px",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: "10px",
+        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+        zIndex: 1000
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {postNotifications.length === 0 ? (
+        <p style={{ padding: "12px", textAlign: "center" }}>
+          No new notifications
+        </p>
+      ) : (
+        postNotifications.map(n => (
           <div
-            key={t.userId}
-            onClick={() => {
-              setSelectedTeacher(t);
-              setTeacherChatOpen(true);
-              setShowMessageDropdown(false);
-            }}
+            key={n.notificationId}
             style={{
-              padding: "10px",
-              borderBottom: "1px solid #eee",
               display: "flex",
-              alignItems: "center",
+              gap: "10px",
+              padding: "10px",
               cursor: "pointer",
-              background: unreadTeachers[t.userId] > 0 ? "#f0f4ff" : "#fff"
+              borderBottom: "1px solid #eee"
             }}
+            onClick={() => handleNotificationClick(n)}
           >
-            <img src={t.profileImage} alt={t.name} style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} />
-            <div style={{ flex: 1 }}>
-              <strong>{t.name}</strong>
-              <p style={{ margin:0, fontSize:"12px", color:"#555" }}>{latestMsg?.text || "No messages yet"}</p>
+            <img
+              src={n.adminProfile || "/default-profile.png"}
+              alt={n.adminName}
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%"
+              }}
+            />
+            <div>
+              <strong>{n.adminName}</strong>
+              <p style={{ margin: 0 }}>{n.message}</p>
             </div>
-            {unreadTeachers[t.userId] > 0 && (
-              <span style={{
-                background: "red",
-                color: "#fff",
-                borderRadius: "50%",
-                padding: "2px 6px",
-                fontSize: "10px",
-                marginLeft: "5px"
-              }}>
-                {unreadTeachers[t.userId]}
-              </span>
-            )}
           </div>
-        )
-      })}
-      {teachers.every(t => !unreadTeachers[t.userId]) && (
-        <p style={{ textAlign: "center", padding: "10px", color:"#777" }}>No new messages</p>
+        ))
       )}
     </div>
   )}
 </div>
 
-          <div className="icon-circle"><FaCog /></div>
+    {/* ================= MESSENGER ================= */}
+    <div
+      className="icon-circle"
+      style={{ position: "relative", cursor: "pointer" }}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowMessageDropdown((prev) => !prev);
+      }}
+    >
+      <FaFacebookMessenger />
+    
+      {/* 🔴 TOTAL UNREAD COUNT */}
+      {Object.keys(unreadSenders).length > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: "-5px",
+            right: "-5px",
+            background: "red",
+            color: "#fff",
+            borderRadius: "50%",
+            padding: "2px 6px",
+            fontSize: "10px",
+            fontWeight: "bold"
+          }}
+        >
+          {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+        </span>
+      )}
+    
+      {/* 📩 DROPDOWN */}
+      {showMessageDropdown && (
+        <div
+          style={{
+            position: "absolute",
+            top: "40px",
+            right: "0",
+            width: "300px",
+            background: "#fff",
+            borderRadius: "10px",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+            zIndex: 1000
+          }}
+        >
+          {Object.keys(unreadSenders).length === 0 ? (
+            <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+              No new messages
+            </p>
+          ) : (
+            Object.entries(unreadSenders).map(([userId, sender]) => (
+              <div
+                key={userId}
+                style={{
+                  padding: "12px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  cursor: "pointer",
+                  borderBottom: "1px solid #eee"
+                }}
+              onClick={async () => {
+  setShowMessageDropdown(false);
+
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
+
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
+  navigate("/all-chat", {
+    state: {
+      user: {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
+  });
+}}
+
+    
+    
+              >
+                <img
+                  src={sender.profileImage}
+                  alt={sender.name}
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%"
+                  }}
+                />
+                <div>
+                  <strong>{sender.name}</strong>
+                  <p style={{ fontSize: "12px", margin: 0 }}>
+                    {sender.count} new message{sender.count > 1 && "s"}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+    {/* ============== END MESSENGER ============== */}
+    
+
+           <Link className="icon-circle" to="/settings">
+                           <FaCog />
+                         </Link>
           <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
         </div>
       </nav>
@@ -522,9 +877,7 @@ const attendanceStats = useMemo(() => {
                           <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
                                      </Link>
                                                
-                        <Link className="sidebar-btn" to="/settings" >
-                                     <FaCog /> Settings
-                                   </Link>
+                   
                        <button
                          className="sidebar-btn logout-btn"
                          onClick={() => {
@@ -538,7 +891,7 @@ const attendanceStats = useMemo(() => {
         </div>
 
         {/* ---------------- MAIN CONTENT ---------------- */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "180px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
           <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Students</h2>
 
           {/* Grade Filter */}
@@ -559,7 +912,7 @@ const attendanceStats = useMemo(() => {
 
           {/* Section Filter */}
           {selectedGrade !== "All" && sections.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px", }}>
               {["All", ...sections].map(section => (
                 <button key={section} onClick={() => setSelectedSection(section)} style={{
                   padding: "8px 16px",
@@ -582,11 +935,11 @@ const attendanceStats = useMemo(() => {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
              {filteredStudents.map(s => (
   <div
-    key={s.studentId}
+    key={s.userId}
     onClick={() => handleSelectStudent(s)}
     style={{
-      width: "500px",
-      height: "70px",
+      width: "700px",
+      height: "100px",
       borderRadius: "12px",
       padding: "15px",
       background: selectedStudent?.studentId === s.studentId ? "#e0e7ff" : "#fff",
@@ -825,42 +1178,43 @@ const attendanceStats = useMemo(() => {
 
             
 
-{/* ATTENDANCE TAB */}
+{/* ================= ATTENDANCE TAB ================= */}
 {studentTab === "attendance" && selectedStudent && (
-  <div style={{ padding: "26px", maxHeight: "70vh", overflowY: "auto", background: "#f1f5f9" }}>
+  <div style={{
+    padding: "20px",
+    maxHeight: "70vh",
+    overflowY: "auto",
+    background: "#f7f8fa",
+    fontFamily: "'Inter', sans-serif"
+  }}>
 
     {/* ================= STICKY CONTROLS ================= */}
     <div style={{
       position: "sticky",
       top: 0,
-      background: "#f8fafc",
-      paddingBottom: "16px",
-      zIndex: 10,
-      boxShadow: "0 5px 15px rgba(0,0,0,0.05)",
-      borderBottomLeftRadius: "16px",
-      borderBottomRightRadius: "16px"
+      zIndex: 30,
+      background: "#ffffff",
+      padding: "12px 0 20px",
+      boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
+      borderBottomLeftRadius: "12px",
+      borderBottomRightRadius: "12px"
     }}>
       {/* View Switch */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "14px" }}>
+      <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "12px" }}>
         {["daily", "weekly", "monthly"].map(v => (
           <button
             key={v}
             onClick={() => setAttendanceView(v)}
             style={{
-              padding: "10px 18px",
-              borderRadius: "12px",
-              border: "none",
-              fontWeight: "800",
+              padding: "8px 20px",
+              borderRadius: "10px",
+              border: "1px solid #d1d5db",
+              fontWeight: 600,
               cursor: "pointer",
-              background: attendanceView === v 
-                ? "linear-gradient(90deg,#2563eb,#22c55e)" 
-                : "#e5e7eb",
-              color: attendanceView === v ? "#fff" : "#111",
-              boxShadow: attendanceView === v 
-                ? "0 4px 15px rgba(34,197,94,0.4)" 
-                : "none",
-              transition: "0.3s",
-              letterSpacing: "0.5px"
+              fontSize: "13px",
+              background: attendanceView === v ? "#2563eb" : "#f3f4f6",
+              color: attendanceView === v ? "#ffffff" : "#374151",
+              transition: "all 0.3s"
             }}
           >
             {v.toUpperCase()}
@@ -869,34 +1223,37 @@ const attendanceStats = useMemo(() => {
       </div>
 
       {/* Course Filter */}
-      <select
-        value={attendanceCourseFilter}
-        onChange={e => setAttendanceCourseFilter(e.target.value)}
-        style={{
-          padding: "10px",
-          borderRadius: "12px",
-          border: "1px solid #cbd5f5",
-          fontWeight: "600",
-          background: "#fff",
-          boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
-          transition: "0.3s"
-        }}
-      >
-        <option value="All">All Subjects</option>
-        {[...new Set(selectedStudent.attendance.map(a => a.courseId))].map(c => (
-          <option key={c} value={c}>
-            {c.replace("course_", "").replace(/_/g, " ")}
-          </option>
-        ))}
-      </select>
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <select
+          value={attendanceCourseFilter}
+          onChange={e => setAttendanceCourseFilter(e.target.value)}
+          style={{
+            padding: "8px 14px",
+            borderRadius: "10px",
+            border: "1px solid #d1d5db",
+            fontWeight: 500,
+            background: "#ffffff",
+            fontSize: "13px",
+            transition: "all 0.3s",
+            cursor: "pointer"
+          }}
+        >
+          <option value="All">All Subjects</option>
+          {[...new Set(selectedStudent.attendance.map(a => a.courseId))].map(c => (
+            <option key={c} value={c}>
+              {c.replace("course_", "").replace(/_/g, " ")}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
 
-    {/* ================= SUMMARY ================= */}
+    {/* ================= SUMMARY CARD ================= */}
     {(() => {
       const data = selectedStudent.attendance;
       const total = data.length;
       const present = data.filter(a => a.status === "present").length;
-      const percent = Math.round((present / total) * 100);
+      const percent = total ? Math.round((present / total) * 100) : 0;
 
       const health =
         percent >= 90 ? { label: "Excellent", color: "#16a34a" } :
@@ -905,76 +1262,85 @@ const attendanceStats = useMemo(() => {
 
       return (
         <div style={{
-          background: "linear-gradient(135deg,#ffffff,#f0f9ff)",
-          borderRadius: "22px",
-          padding: "22px",
-          margin: "22px 0",
-          boxShadow: "0 18px 45px rgba(0,0,0,0.08)",
-          transition: "0.3s",
-          border: `1px solid ${health.color}`
+          background: "#ffffff",
+          borderRadius: "16px",
+          padding: "16px 20px",
+          margin: "16px 0",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
+          borderLeft: `4px solid ${health.color}`
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: "14px", color: "#64748b", letterSpacing: "0.5px" }}>
-                Attendance Health
-              </div>
-              <div style={{ fontSize: "28px", fontWeight: "900", color: health.color, letterSpacing: "0.5px" }}>
-                {health.label}
-              </div>
+          <div>
+            <div style={{ fontSize: "12px", color: "#6b7280", letterSpacing: "0.5px" }}>
+              Attendance Health
             </div>
-            <div style={{
-              fontSize: "32px",
-              fontWeight: "900",
-              color: `rgba(${health.color === "#16a34a" ? "22,163,52" : health.color === "#2563eb" ? "37,99,235" : "220,38,38"},0.9)`,
-              background: "rgba(0,0,0,0.03)",
-              borderRadius: "12px",
-              padding: "8px 16px",
-              boxShadow: `0 0 12px ${health.color}40`
-            }}>
-              {percent}%
+            <div style={{ fontSize: "22px", fontWeight: 700, color: health.color, marginTop: "2px" }}>
+              {health.label}
             </div>
           </div>
 
-          {/* Progress Bar */}
+          {/* Minimal Progress Circle */}
           <div style={{
-            height: "12px",
-            background: "#e5e7eb",
-            borderRadius: "999px",
-            marginTop: "16px",
-            overflow: "hidden",
-            boxShadow: "inset 0 2px 5px rgba(0,0,0,0.05)"
+            width: "60px",
+            height: "60px",
+            borderRadius: "50%",
+            border: `5px solid #e5e7eb`,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            position: "relative"
           }}>
             <div style={{
-              width: `${percent}%`,
-              height: "100%",
-              background: health.color,
-              transition: "width 0.6s",
-              borderRadius: "999px"
-            }} />
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "60px",
+              height: "60px",
+              borderRadius: "50%",
+              clip: "rect(0, 60px, 60px, 30px)",
+              background: "transparent"
+            }}>
+              <div style={{
+                width: "60px",
+                height: "60px",
+                borderRadius: "50%",
+                border: `5px solid ${health.color}`,
+                clip: "rect(0, 30px, 60px, 0)",
+                transform: `rotate(${(percent / 100) * 360}deg)`,
+                transformOrigin: "center",
+                transition: "transform 0.5s ease-in-out"
+              }} />
+            </div>
+            <div style={{
+              fontSize: "16px",
+              fontWeight: 600,
+              color: "#374151"
+            }}>{percent}%</div>
           </div>
         </div>
       );
     })()}
 
-    {/* ================= RECORDS ================= */}
+    {/* ================= ATTENDANCE RECORDS ================= */}
     {Object.entries(groupedAttendance).map(([group, records]) => {
       const filtered = attendanceCourseFilter === "All"
         ? records
-        : records.filter(r => r.courseId === attendanceCourseFilter);
+        : records.filter(r => r.courseId === attendanceCourseFilter || r.courseId.replace("course_", "").replace(/_/g," ").toLowerCase() === attendanceCourseFilter.toLowerCase());
 
       if (!filtered.length) return null;
 
       return (
         <div key={group} style={{
-          background: "#fff",
-          borderRadius: "22px",
-          padding: "22px",
-          marginBottom: "22px",
-          boxShadow: "0 15px 40px rgba(0,0,0,0.08)",
-          transition: "0.3s",
-          borderLeft: "6px solid #2563eb"
+          background: "#ffffff",
+          borderRadius: "14px",
+          padding: "16px 18px",
+          marginBottom: "16px",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
+          borderLeft: "4px solid #2563eb"
         }}>
-          <h3 style={{ color: "#2563eb", marginBottom: "14px", letterSpacing: "0.5px" }}>
+          <h3 style={{ color: "#1e40af", marginBottom: "12px", fontSize: "14px" }}>
             📅 {group}
           </h3>
 
@@ -982,15 +1348,16 @@ const attendanceStats = useMemo(() => {
             <div key={i} style={{
               display: "grid",
               gridTemplateColumns: "1fr auto",
-              padding: "14px 0",
-              borderBottom: i !== filtered.length - 1 ? "1px solid #e5e7eb" : "none",
-              transition: "0.3s"
+              padding: "10px 0",
+              borderBottom: i !== filtered.length - 1 ? "1px solid #f3f4f6" : "none",
+              alignItems: "center",
+              gap: "10px"
             }}>
               <div>
-                <div style={{ fontWeight: "800", fontSize: "15px" }}>
+                <div style={{ fontWeight: 700, fontSize: "15px", color: "#111827" }}>
                   {r.courseId.replace("course_", "").replace(/_/g, " ")}
                 </div>
-                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                <div style={{ fontSize: "12px", color: "#6b7280" }}>
                   👨‍🏫 {r.teacherName}
                 </div>
               </div>
@@ -999,17 +1366,14 @@ const attendanceStats = useMemo(() => {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                padding: "6px 16px",
+                padding: "5px 12px",
                 borderRadius: "999px",
-                fontWeight: "900",
-                background: r.status === "present" 
-                  ? "linear-gradient(90deg,#dcfce7,#bbf7d0)" 
-                  : "linear-gradient(90deg,#fee2e2,#fecaca)",
+                fontWeight: 600,
+                fontSize: "13px",
+                background: r.status === "present" ? "#d1fae5" : "#fee2e2",
                 color: r.status === "present" ? "#166534" : "#991b1b",
-                boxShadow: r.status === "present" 
-                  ? "0 0 12px #22c55e30" 
-                  : "0 0 12px #dc262630",
-                transition: "0.3s"
+                boxShadow: "inset 0 1px 3px rgba(0,0,0,0.05)",
+                transition: "all 0.2s"
               }}>
                 {r.status === "present" ? "✔" : "✖"} {r.status.toUpperCase()}
               </span>
@@ -1028,7 +1392,6 @@ const attendanceStats = useMemo(() => {
 
 
 
-
             {/* PERFORMANCE TAB */}
             {studentTab === "performance" && (
               <div>
@@ -1037,8 +1400,10 @@ const attendanceStats = useMemo(() => {
                 ) : (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
                     {Object.entries(selectedStudent.marks).map(([courseId, m], idx) => {
-                      const total = (m.mark20 || 0) + (m.mark30 || 0) + (m.mark50 || 0);
-                      const percentage = Math.min(total, 100);
+                     const total = (Number(m.mark20) || 0) + (Number(m.mark30) || 0) + (Number(m.mark50) || 0);
+
+                    const percentage = Math.min(total, 100);
+
                       const statusColor = percentage >= 75 ? "#16a34a" : percentage >= 50 ? "#f59e0b" : "#dc2626";
 
                       return (
@@ -1148,8 +1513,7 @@ const attendanceStats = useMemo(() => {
    
   </div>
 )}
-
-      // ---------------- STUDENT CHAT POPUP ----------------
+{/* ================= STUDENT CHAT POPUP ================= */}
 {studentChatOpen && selectedStudent && (
   <div style={{
     position: "fixed",
@@ -1168,18 +1532,22 @@ const attendanceStats = useMemo(() => {
       <strong>{selectedStudent.name}</strong>
       <div style={{ display: "flex", gap: "10px" }}>
         {/* Expand Button */}
-        <button
-          onClick={() => {
-            setStudentChatOpen(false);
-            navigate("/all-chat", { 
-              state: { 
-                user: { userId: selectedStudent.studentId, name: selectedStudent.name }, 
-                userType: "student" 
-              } 
-            });
-          }}
-          style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer" }}
-        >
+     <button
+  onClick={() => {
+    setStudentChatOpen(false);
+    navigate("/all-chat", { 
+      state: { 
+        user: { 
+          userId: selectedStudent.userId,  // ✅ Correct userId
+          name: selectedStudent.name, 
+          profileImage: selectedStudent.profileImage || "/default-profile.png" 
+        }, 
+        userType: "student" 
+      } 
+    });
+  }}
+>
+
           <img width="30" height="30" src="https://img.icons8.com/ios-glyphs/30/expand--v1.png" alt="expand" />
         </button>
 
@@ -1202,7 +1570,7 @@ const attendanceStats = useMemo(() => {
               display: "inline-block",
               maxWidth: "80%"
             }}>
-              {msg.content}
+              {msg.text}
               {msg.edited && <span style={{ fontSize: "10px", opacity: 0.7 }}> (edited)</span>}
             </span>
           </div>
@@ -1220,7 +1588,7 @@ const attendanceStats = useMemo(() => {
         placeholder="Type a message..."
         style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }}
       />
-      <button onClick={handleSendMessage} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
+      <button onClick={() => sendPopupMessage(newMessageText)} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
     </div>
   </div>
 )}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
 import {
   FaCalendarAlt,
   FaHome,
@@ -17,6 +18,9 @@ import { ref, get, set } from "firebase/database";
 import { db } from "../firebase";
 import { DragDropContext, Droppable, Draggable } from "react-beautiful-dnd";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { useNavigate } from "react-router-dom";
+
+
 
 /* ================= CONSTANTS ================= */
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
@@ -24,8 +28,9 @@ const PERIODS = [
   "P1 (2:00–2:45)",
   "P2 (2:45–3:30)",
   "P3 (3:30–4:15)",
-  "P4 (4:15–5:00)",
-  "P5 (5:00–5:45)",
+  "Break",
+  "P4 (4:30–5:15)",
+  "P5 (5:15–6:00)",
   "LUNCH",
   "P6 (7:15–8:00)",
   "P7 (8:00–8:45)",
@@ -52,18 +57,84 @@ export default function SchedulePage() {
   const [editingCell, setEditingCell] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
 // { day, period, subject, teacherId }
-
+const [unreadSenders, setUnreadSenders] = useState([]); 
 const [teachers, setTeachers] = useState([]);
 const [unreadTeachers, setUnreadTeachers] = useState({});
 const [popupMessages, setPopupMessages] = useState([]);
 const [showMessageDropdown, setShowMessageDropdown] = useState(false);
 const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
+  const navigate = useNavigate();
+const [postNotifications, setPostNotifications] = useState([]);
+const [showPostDropdown, setShowPostDropdown] = useState(false);
 
+
+const adminId = admin.userId;
 
 const adminUserId = admin.userId;
 
+const MAX_TEACHER_PERIODS_PER_DAY = 4;
 
+const fetchPostNotifications = async () => {
+  try {
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
+
+    const notifications = (res.data || []).map(n => ({
+      ...n,
+      notificationId: n.notificationId || n.id
+    }));
+
+    setPostNotifications(notifications);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+  }
+};
+
+useEffect(() => {
+  if (!adminId) return;
+
+  fetchPostNotifications();
+  const interval = setInterval(fetchPostNotifications, 5000);
+
+  return () => clearInterval(interval);
+}, [adminId]);
+
+
+const handleNotificationClick = async (notification) => {
+  // Mark as read in backend
+  await axios.post(
+    "http://127.0.0.1:5000/api/mark_post_notification_read",
+    { notificationId: notification.notificationId }
+  );
+
+  // Remove from UI
+  setPostNotifications(prev =>
+    prev.filter(n => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // Navigate to dashboard with postId
+  navigate("/dashboard", {
+    state: { postId: notification.postId }
+  });
+};
+
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".notification-dropdown")
+    ) {
+      setShowPostDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
 
   /* ================= FETCH DATABASE ================= */
   const fetchAll = async () => {
@@ -110,6 +181,20 @@ const adminUserId = admin.userId;
       setLoading(false);
     }
   };
+
+const handleClick = () => {
+    navigate("/all-chat"); // replace with your target route
+  };
+
+  useEffect(() => {
+    // Replace with your actual API call
+    const fetchUnreadSenders = async () => {
+      const response = await fetch("/api/unreadSenders");
+      const data = await response.json();
+      setUnreadSenders(data);
+    };
+    fetchUnreadSenders();
+  }, []);
 
 useEffect(() => {
   const fetchTeachersAndUnread = async () => {
@@ -182,62 +267,267 @@ const getTeachersForCourse = (courseId) => {
 };
 
 
+ // ---------------- FETCH UNREAD MESSAGES ----------------
+const fetchUnreadMessages = async () => {
+  if (!admin.userId) return;
+
+  const senders = {};
+
+  try {
+    // 1️⃣ USERS (names & images)
+    const usersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+    );
+    const usersData = usersRes.data || {};
+
+ const findUserByUserId = (userId) => {
+  return Object.values(usersData).find(u => u.userId === userId);
+};
 
 
 
+    // helper to read messages from BOTH chat keys
+    const getUnreadCount = async (userId) => {
+      const key1 = `${admin.userId}_${userId}`;
+      const key2 = `${userId}_${admin.userId}`;
 
+      const [r1, r2] = await Promise.all([
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+      ]);
 
+      const msgs = [
+        ...Object.values(r1.data || {}),
+        ...Object.values(r2.data || {})
+      ];
 
-/* ================= AUTO GENERATE RANDOMLY ================= */
-/* ================= AUTO GENERATE RANDOMLY ================= */
-const autoGenerate = () => {
-  if (!selectedClassKey) return alert("Select grade & section first");
+      return msgs.filter(
+        m => m.receiverId === admin.userId && !m.seen
+      ).length;
+    };
 
-  const data = structuredClone(schedule || {});
-  const classCourses = filteredCourses;
+    // 2️⃣ TEACHERS
+    const teachersRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+    );
 
-  if (!classCourses.length) return alert("No courses available for this class");
+    for (const k in teachersRes.data || {}) {
+      const t = teachersRes.data[k];
+      const unread = await getUnreadCount(t.userId);
 
-  DAYS.forEach(day => {
-    if (!data[day]) data[day] = {};
-    data[day][selectedClassKey] = {};
+      if (unread > 0) {
+       const user = findUserByUserId(t.userId);
 
-    let previousTeacherId = null; // track teacher of previous period
-
-    PERIODS.forEach(p => {
-      if (p === "LUNCH") {
-        data[day][selectedClassKey][p] = { break: true };
-        previousTeacherId = null; // reset after lunch
-        return;
+senders[t.userId] = {
+  type: "teacher",
+  name: user?.name || "Teacher",
+  profileImage: user?.profileImage || "/default-profile.png",
+  count: unread
+};
       }
+    }
 
-      // Filter courses so we don't assign same teacher as previous period
-      const availableCourses = classCourses.filter(c => {
-        const tid = courseTeacherMap[c.id] || null;
-        return tid !== previousTeacherId;
+    // 3️⃣ STUDENTS
+    const studentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+    );
+
+    for (const k in studentsRes.data || {}) {
+      const s = studentsRes.data[k];
+      const unread = await getUnreadCount(s.userId);
+
+      if (unread > 0) {
+        const user = findUserByUserId(s.userId);
+
+senders[s.userId] = {
+  type: "student",
+  name: user?.name || s.name || "Student",
+  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    // 4️⃣ PARENTS
+    const parentsRes = await axios.get(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+    );
+
+    for (const k in parentsRes.data || {}) {
+      const p = parentsRes.data[k];
+      const unread = await getUnreadCount(p.userId);
+
+      if (unread > 0) {
+       const user = findUserByUserId(p.userId);
+
+senders[p.userId] = {
+  type: "parent",
+  name: user?.name || p.name || "Parent",
+  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+  count: unread
+};
+
+      }
+    }
+
+    setUnreadSenders(senders);
+  } catch (err) {
+    console.error("Unread fetch failed:", err);
+  }
+};
+
+  // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
+useEffect(() => {
+  const closeDropdown = (e) => {
+    if (
+      !e.target.closest(".icon-circle") &&
+      !e.target.closest(".messenger-dropdown")
+    ) {
+      setShowMessageDropdown(false);
+    }
+  };
+
+  document.addEventListener("click", closeDropdown);
+  return () => document.removeEventListener("click", closeDropdown);
+}, []);
+
+
+useEffect(() => {
+  if (!admin.userId) return;
+
+  fetchUnreadMessages();
+  const interval = setInterval(fetchUnreadMessages, 5000);
+
+  return () => clearInterval(interval);
+}, [admin.userId]);
+
+
+
+
+
+/* ================= AUTO GENERATE RANDOMLY (FIXED) ================= */
+/* ================= AUTO GENERATE RANDOMLY (DEADLOCK SAFE) ================= */
+const autoGenerate = () => {
+  if (!selectedClassKey) {
+    alert("Select grade & section first");
+    return;
+  }
+
+  const MAX_ATTEMPTS = 50;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const freqMapOriginal = { ...weeklyFrequency[selectedClassKey] };
+      const classCourses = filteredCourses;
+
+      // Clone schedule
+      const data = structuredClone(schedule || {});
+
+      // ================= TRACKERS =================
+      // Tracks teacher occupation across all classes and periods
+      const teacherTimeSlot = {}; // { day: { period: { teacherId: true } } }
+
+      // Tracks last period of teacher in THIS class to avoid consecutive periods
+      const lastTeacherPeriod = {}; // { classKey: { teacherId: periodIndex } }
+
+      DAYS.forEach(day => {
+        if (!data[day]) data[day] = {};
+        teacherTimeSlot[day] ??= {};
+        Object.keys(classes).forEach(grade => {
+          [...classes[grade]].forEach(section => {
+            const key = `Grade ${grade}${section}`;
+            if (!data[day][key]) data[day][key] = {};
+          });
+        });
       });
 
-      // If no course avoids repetition, allow all (to avoid deadlock)
-      const possibleCourses = availableCourses.length ? availableCourses : classCourses;
+      // Initialize teacherTimeSlot from already scheduled classes
+      DAYS.forEach(day => {
+        PERIODS.forEach(period => {
+          if (period === "LUNCH") return;
+          Object.keys(classes).forEach(grade => {
+            [...classes[grade]].forEach(section => {
+              const key = `Grade ${grade}${section}`;
+              const cell = data[day][key]?.[period];
+              if (cell?.teacherId) {
+                teacherTimeSlot[day][period] ??= {};
+                teacherTimeSlot[day][period][cell.teacherId] = true;
+              }
+            });
+          });
+        });
+      });
 
-      // Pick a random course
-      const randomCourse = possibleCourses[Math.floor(Math.random() * possibleCourses.length)];
-      const tid = courseTeacherMap[randomCourse.id] || null;
-      const tname = teacherMap[tid] || "Unassigned";
+      // Shuffle courses to randomize placement
+      const shuffledCourses = [...classCourses].sort(() => Math.random() - 0.5);
 
-      // Assign course to schedule
-      data[day][selectedClassKey][p] = {
-        subject: randomCourse.subject,
-        teacherId: tid,
-        teacherName: tname
-      };
+      const freqMap = { ...freqMapOriginal };
 
-      previousTeacherId = tid; // update previous teacher
-    });
-  });
+      for (let day of DAYS) {
+        const activePeriods = PERIODS.filter(p => p !== "LUNCH" && p !== "Break");
+        let lastSubject = null;
 
-  setSchedule(data);
-  calculateTeacherWorkload(data);
+        for (let period of activePeriods) {
+          let placed = false;
+          const candidates = [...shuffledCourses].sort(() => Math.random() - 0.5);
+
+          for (let course of candidates) {
+            const teacherId = courseTeacherMap[course.id];
+            if (freqMap[course.id] <= 0) continue;
+            if (course.subject === lastSubject) continue;
+
+            // ===== CROSS-CLASS TEACHER CONFLICT =====
+            if (teacherId && teacherTimeSlot[day][period]?.[teacherId]) continue;
+
+            // Avoid consecutive periods in the same class
+            const lastPeriodIndex = lastTeacherPeriod[selectedClassKey]?.[teacherId];
+            if (lastPeriodIndex === activePeriods.indexOf(period) - 1) continue;
+
+            // Max periods/day for the subject
+            const maxPerDay = (freqMapOriginal[course.id] > 5) ? 2 : 1;
+            const dayCount = Object.values(data[day][selectedClassKey] || {}).filter(
+              c => c?.subject === course.subject
+            ).length;
+            if (dayCount >= maxPerDay) continue;
+
+            // ===== ASSIGN =====
+            data[day][selectedClassKey][period] = {
+              subject: course.subject,
+              teacherId,
+              teacherName: teacherMap[teacherId] || "Unassigned"
+            };
+
+            // Update trackers
+            teacherTimeSlot[day][period] ??= {};
+            if (teacherId) {
+              teacherTimeSlot[day][period][teacherId] = true;
+              lastTeacherPeriod[selectedClassKey] ??= {};
+              lastTeacherPeriod[selectedClassKey][teacherId] = activePeriods.indexOf(period);
+            }
+
+            freqMap[course.id]--;
+            lastSubject = course.subject;
+            placed = true;
+            break;
+          }
+
+          if (!placed) throw new Error("Deadlock: unable to place subjects without violating constraints");
+        }
+      }
+
+      setSchedule(data);
+      calculateTeacherWorkload(data);
+      console.log(`✅ Timetable for ${selectedClassKey} generated successfully`);
+      return;
+
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) {
+        alert("Unable to generate timetable after multiple attempts. Try adjusting weekly subject counts or teacher assignments.");
+        console.error(err);
+      }
+    }
+  }
 };
 
 
@@ -312,7 +602,36 @@ const cancelEdit = () => setEditTarget(null);
     alert("Schedule saved successfully");
   };
 
-  
+  const markMessagesAsSeen = async (userId) => {
+  const key1 = `${admin.userId}_${userId}`;
+  const key2 = `${userId}_${admin.userId}`;
+
+  const [r1, r2] = await Promise.all([
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+  ]);
+
+  const updates = {};
+
+  const collectUpdates = (data, basePath) => {
+    Object.entries(data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === admin.userId && !msg.seen) {
+        updates[`${basePath}/${msgId}/seen`] = true;
+      }
+    });
+  };
+
+  collectUpdates(r1.data, `Chats/${key1}/messages`);
+  collectUpdates(r2.data, `Chats/${key2}/messages`);
+
+  if (Object.keys(updates).length > 0) {
+    await axios.patch(
+      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+      updates
+    );
+  }
+};
+
 
   /* ================= STYLES ================= */
  const styles = {
@@ -324,7 +643,7 @@ const cancelEdit = () => setEditTarget(null);
     left: 0,
     right: 0,
     height: 70,
-    background: "#4b6cb7",
+    background: "#e3e6ecff",
     color: "#fff",
     boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
     display: "flex",
@@ -349,7 +668,7 @@ const cancelEdit = () => setEditTarget(null);
 
   main: {
     marginTop: 70,
-    marginLeft: 320,
+    marginLeft: 400,
     flex: 1,
     padding: 24,
     overflowY: "auto",
@@ -371,7 +690,7 @@ const cancelEdit = () => setEditTarget(null);
     transition: "0.3s",
   },
   navBtnHover: {
-    background: "#4b6cb7",
+    background: "#ffffffff",
     color: "#fff",
   },
 
@@ -380,8 +699,8 @@ const cancelEdit = () => setEditTarget(null);
     gap: 20,
     padding: 24,
     borderRadius: 20,
-    background: "linear-gradient(135deg,#667eea,#764ba2)",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+    background: "linear-gradient(135deg, #e4e6ecff)",
+    boxShadow: "0 10px 30px rgba(255, 255, 255, 0.2)",
     color: "#fff",
     fontWeight: 600
   },
@@ -489,95 +808,207 @@ const cancelEdit = () => setEditTarget(null);
     <FaSearch className="search-icon" />
   </div>
   <div className="nav-right">
-            <div className="icon-circle"><FaBell /></div>
-          <div 
-  className="icon-circle" 
+           <div
+  className="icon-circle"
   style={{ position: "relative", cursor: "pointer" }}
-  onClick={() => setShowMessageDropdown(prev => !prev)}
+  onClick={(e) => {
+    e.stopPropagation();
+    setShowPostDropdown(prev => !prev);
+  }}
 >
-  <FaFacebookMessenger />
-  {Object.values(unreadTeachers).reduce((a,b)=>a+b,0) > 0 && (
-    <span style={{
-      position: "absolute",
-      top: "-5px",
-      right: "-5px",
-      background: "red",
-      color: "#fff",
-      borderRadius: "50%",
-      padding: "2px 6px",
-      fontSize: "10px",
-      fontWeight: "bold"
-    }}>
-      {Object.values(unreadTeachers).reduce((a,b)=>a+b,0)}
+  <FaBell />
+
+  {/* 🔴 Notification Count */}
+  {postNotifications.length > 0 && (
+    <span
+      style={{
+        position: "absolute",
+        top: "-5px",
+        right: "-5px",
+        background: "red",
+        color: "#fff",
+        borderRadius: "50%",
+        padding: "2px 6px",
+        fontSize: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      {postNotifications.length}
     </span>
   )}
 
-  {showMessageDropdown && (
-    <div style={{
-      position: "absolute",
-      top: "35px",
-      right: "0",
-      width: "300px",
-      maxHeight: "400px",
-      overflowY: "auto",
-      background: "#fff",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-      zIndex: 1000
-    }}>
-      {teachers.map(t => {
-        const msgs = popupMessages
-          .filter(m => m.senderId === t.userId || m.receiverId === t.userId)
-          .sort((a,b) => a.timeStamp - b.timeStamp);
-        const latestMsg = msgs[msgs.length - 1];
-
-        return (
+  {/* 🔔 Notification Dropdown */}
+  {showPostDropdown && (
+    <div
+      className="notification-dropdown"
+      style={{
+        position: "absolute",
+        top: "40px",
+        right: "0",
+        width: "350px",
+        maxHeight: "400px",
+        overflowY: "auto",
+        background: "#fff",
+        borderRadius: "10px",
+        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+        zIndex: 1000
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {postNotifications.length === 0 ? (
+        <p style={{ padding: "12px", textAlign: "center" }}>
+          No new notifications
+        </p>
+      ) : (
+        postNotifications.map(n => (
           <div
-            key={t.userId}
-            onClick={() => {
-              setSelectedTeacher(t);
-              setTeacherChatOpen(true);
-              setShowMessageDropdown(false);
-            }}
+            key={n.notificationId}
             style={{
-              padding: "10px",
-              borderBottom: "1px solid #eee",
               display: "flex",
-              alignItems: "center",
+              gap: "10px",
+              padding: "10px",
               cursor: "pointer",
-              background: unreadTeachers[t.userId] > 0 ? "#f0f4ff" : "#fff"
+              borderBottom: "1px solid #eee"
             }}
+            onClick={() => handleNotificationClick(n)}
           >
-            <img src={t.profileImage} alt={t.name} style={{ width: "40px", height: "40px", borderRadius: "50%", marginRight: "10px" }} />
-            <div style={{ flex: 1 }}>
-              <strong>{t.name}</strong>
-              <p style={{ margin:0, fontSize:"12px", color:"#555" }}>{latestMsg?.text || "No messages yet"}</p>
+            <img
+              src={n.adminProfile || "/default-profile.png"}
+              alt={n.adminName}
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%"
+              }}
+            />
+            <div>
+              <strong>{n.adminName}</strong>
+              <p style={{ margin: 0 }}>{n.message}</p>
             </div>
-            {unreadTeachers[t.userId] > 0 && (
-              <span style={{
-                background: "red",
-                color: "#fff",
-                borderRadius: "50%",
-                padding: "2px 6px",
-                fontSize: "10px",
-                marginLeft: "5px"
-              }}>
-                {unreadTeachers[t.userId]}
-              </span>
-            )}
           </div>
-        )
-      })}
-      {teachers.every(t => !unreadTeachers[t.userId]) && (
-        <p style={{ textAlign: "center", padding: "10px", color:"#777" }}>No new messages</p>
+        ))
       )}
     </div>
   )}
 </div>
 
+  {/* ================= MESSENGER ================= */}
+  <div
+    className="icon-circle"
+    style={{ position: "relative", cursor: "pointer" }}
+    onClick={(e) => {
+      e.stopPropagation();
+      setShowMessageDropdown((prev) => !prev);
+    }}
+  >
+    <FaFacebookMessenger />
   
-            <div className="icon-circle"><FaCog /></div>
+    {/* 🔴 TOTAL UNREAD COUNT */}
+    {Object.keys(unreadSenders).length > 0 && (
+      <span
+        style={{
+          position: "absolute",
+          top: "-5px",
+          right: "-5px",
+          background: "red",
+          color: "#fff",
+          borderRadius: "50%",
+          padding: "2px 6px",
+          fontSize: "10px",
+          fontWeight: "bold"
+        }}
+      >
+        {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
+      </span>
+    )}
+  
+    {/* 📩 DROPDOWN */}
+    {showMessageDropdown && (
+      <div
+        style={{
+          position: "absolute",
+          top: "40px",
+          right: "0",
+          width: "300px",
+          background: "#fff",
+          borderRadius: "10px",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+          zIndex: 1000
+        }}
+      >
+        {Object.keys(unreadSenders).length === 0 ? (
+          <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
+            No new messages
+          </p>
+        ) : (
+          Object.entries(unreadSenders).map(([userId, sender]) => (
+            <div
+              key={userId}
+              style={{
+                padding: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                cursor: "pointer",
+                borderBottom: "1px solid #eee"
+              }}
+            onClick={async () => {
+  setShowMessageDropdown(false);
+
+  // 1️⃣ Mark messages as seen in DB
+  await markMessagesAsSeen(userId);
+
+  // 2️⃣ Remove sender immediately from UI
+  setUnreadSenders(prev => {
+    const copy = { ...prev };
+    delete copy[userId];
+    return copy;
+  });
+
+  // 3️⃣ Navigate to exact chat
+  navigate("/all-chat", {
+    state: {
+      user: {
+        userId,
+        name: sender.name,
+        profileImage: sender.profileImage,
+        type: sender.type
+      }
+    }
+  });
+}}
+
+  
+  
+            >
+              <img
+                src={sender.profileImage}
+                alt={sender.name}
+                style={{
+                  width: "42px",
+                  height: "42px",
+                  borderRadius: "50%"
+                }}
+              />
+              <div>
+                <strong>{sender.name}</strong>
+                <p style={{ fontSize: "12px", margin: 0 }}>
+                  {sender.count} new message{sender.count > 1 && "s"}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    )}
+  </div>
+  {/* ============== END MESSENGER ============== */}
+  
+
+  
+            <Link className="icon-circle" to="/settings">
+                  <FaCog />
+                </Link>
             <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
           </div>
 </div>
@@ -613,9 +1044,7 @@ const cancelEdit = () => setEditTarget(null);
                                               <Link className="sidebar-btn" to="/parents"><FaChalkboardTeacher /> Parents
                                                          </Link>
                                                                    
-                                            <Link className="sidebar-btn" to="/settings" >
-                                                         <FaCog /> Settings
-                                                       </Link>
+                                        
                                            <button
                                              className="sidebar-btn logout-btn"
                                              onClick={() => {
@@ -685,82 +1114,50 @@ const cancelEdit = () => setEditTarget(null);
                     <Droppable droppableId={day} direction="horizontal">
                       {prov => (
                         <div ref={prov.innerRef} {...prov.droppableProps} style={{ display: "flex", gap: 12, overflowX: "auto" }}>
-                          {PERIODS.filter(p => p !== "LUNCH").map((p, i) => {
-                            const d = schedule[day]?.[selectedClassKey]?.[p];
-                            return (
-                              <Draggable draggableId={`${day}-${p}`} index={i} key={p}>
-                                {prov => (
-                                  <div
-  ref={prov.innerRef}
-  {...prov.draggableProps}
-  {...prov.dragHandleProps}
-  onDoubleClick={() => editCell(day, p)}
-  style={{
-    ...styles.period,
-    cursor: "pointer",
-    ...prov.draggableProps.style
-  }}
->
+                       {PERIODS.map((p, i) => {
+  if (p === "Break") {
+    return (
+      <div key={p} style={{ ...styles.lunch, background: "#a5f3fc" }}>
+        ☕ Break
+      </div>
+    );
+  }
+  if (p === "LUNCH") {
+    return (
+      <div key={p} style={styles.lunch}>
+        🍽 Lunch
+      </div>
+    );
+  }
 
-                                    <b>{p}</b>
+  const d = schedule[day]?.[selectedClassKey]?.[p];
+  return (
+    <Draggable draggableId={`${day}-${p}`} index={i} key={p}>
+      {prov => (
+        <div
+          ref={prov.innerRef}
+          {...prov.draggableProps}
+          {...prov.dragHandleProps}
+          onDoubleClick={() => editCell(day, p)}
+          style={{
+            ...styles.period,
+            cursor: "pointer",
+            ...prov.draggableProps.style
+          }}
+        >
+          <b>{p}</b>
+          <div>{d?.subject}</div>
+          <div style={{ color: "#2563eb" }}>{d?.teacherName}</div>
+          <small style={{ fontSize: 11, opacity: 0.6 }}>Double-click to edit</small>
+        </div>
+      )}
+    </Draggable>
+  );
+})}
 
-{editTarget &&
- editTarget.day === day &&
- editTarget.period === p ? (
-  <>
-    <select
-      value={editTarget.subject}
-      onChange={e =>
-        setEditTarget(prev => ({
-          ...prev,
-          subject: e.target.value,
-          teacherId: courseTeacherMap[e.target.value] || ""
-        }))
-      }
-      style={{ width: "100%", marginTop: 6 }}
-    >
-      <option value="">Select Subject</option>
-      {filteredCourses.map(c => (
-        <option key={c.id} value={c.id}>{c.subject}</option>
-      ))}
-    </select>
 
-    <select
-      value={editTarget.teacherId}
-      onChange={e =>
-        setEditTarget(prev => ({ ...prev, teacherId: e.target.value }))
-      }
-      style={{ width: "100%", marginTop: 6 }}
-    >
-      <option value="">Select Teacher</option>
-      {getTeachersForCourse(editTarget.subject).map(t => (
-        <option key={t.id} value={t.id}>{t.name}</option>
-      ))}
-    </select>
-
-    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-      <button onClick={saveEdit} style={{ flex: 1 }}>✔</button>
-      <button onClick={cancelEdit} style={{ flex: 1 }}>✖</button>
-    </div>
-  </>
-) : (
-  <>
-    <div>{d?.subject}</div>
-    <div style={{ color: "#2563eb" }}>{d?.teacherName}</div>
-    <small style={{ fontSize: 11, opacity: 0.6 }}>
-      Double-click to edit
-    </small>
-  </>
-)}
-
-                                    
-                                  </div>
-                                )}
-                              </Draggable>
-                            );
-                          })}
                           {prov.placeholder}
-                          <div style={styles.lunch}>🍽 Lunch</div>
+                        
                         </div>
                       )}
                     </Droppable>

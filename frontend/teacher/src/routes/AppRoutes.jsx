@@ -10,7 +10,7 @@ import Attendance from "../components/AttendancePage";
 import TeacherChatPage from "../components/TeacherChatPage"; // ✅ Chat
 import AdminPage from "../components/AdminPage"; // ✅ Admin
 import TeacherNotesPage from "../components/TeacherNotesPage"; // ✅ NEW Notes Page
-
+import Parents from "../components//Parents";
 export default function AppRoutes() {
   return (
     <Router>
@@ -27,7 +27,7 @@ export default function AppRoutes() {
         <Route path="/marks" element={<Marks />} />
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/notes" element={<TeacherNotesPage />} /> {/* ✅ Teacher Notes */}
-
+        <Route path="/parents" element={<Parents />} /> 
         {/* Chat */}
         <Route path="/teacher-chat" element={<TeacherChatPage />} />
       </Routes>
