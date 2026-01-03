@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
+import { ref, onValue, off } from "firebase/database";
+import { db } from "../firebase";
 import {
   FaHome,
   FaUsers,
@@ -10,9 +12,27 @@ import {
   FaBell,
   FaSearch,
   FaHandHoldingMedical, FaChalkboardTeacher, FaFacebookMessenger,
-  FaCommentDots
+  FaCommentDots, FaCheck
 } from "react-icons/fa";
 import "../styles/global.css";
+
+
+const getChatId = (id1, id2) => {
+  return [id1, id2].sort().join("_");
+};
+
+// format timestamp into hh:mm or readable format
+const formatTime = (timeStamp) => {
+  if (!timeStamp) return "";
+  const date = new Date(timeStamp);
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
+
+const API_BASE = "http://127.0.0.1:5000/api";
+
 
 // Admin item component
 const AdminItem = ({ admin, selected, onClick }) => (
@@ -55,22 +75,33 @@ const AdminItem = ({ admin, selected, onClick }) => (
 );
 
 function AdminPage() {
+ // ---------------- State ----------------
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedAdmin, setSelectedAdmin] = useState(null);
-
   const [adminTab, setAdminTab] = useState("details");
   const [adminChatOpen, setAdminChatOpen] = useState(false);
 
-  const [popupMessages, setPopupMessages] = useState([]);
-  const [popupInput, setPopupInput] = useState("");
-
-  const [teacherInfo, setTeacherInfo] = useState(null);
- const [teacher, setTeacher] = useState(null);
-
+  const [messages, setMessages] = useState([]);
+  const [newMessageText, setNewMessageText] = useState("");
   const messagesEndRef = useRef(null);
-  
+
+  const [teacher, setTeacher] = useState(null);
+  const teacherData = JSON.parse(localStorage.getItem("teacher")) || {};
+  const teacherUserId = String(teacherData.userId || "");
+  const [selectedChatUser, setSelectedChatUser] = useState(null);
+
+  // Notifications
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [highlightedPostId, setHighlightedPostId] = useState(null);
+  const postRefs = useRef({});
+
+  // ---------------- Helpers ----------------
+  const handleSelectUser = (user) => setSelectedChatUser(user);
+
+    
 const navigate = useNavigate();
 
 useEffect(() => {
@@ -86,6 +117,54 @@ useEffect(() => {
     localStorage.removeItem("teacher"); // or "user", depending on your auth
     navigate("/login");
   };
+
+
+
+// Fetch notifications from posts
+useEffect(() => {
+  const fetchNotifications = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/get_posts`);
+      const postsData = res.data || [];
+
+      // Use last 5 posts as notifications
+      const latestNotifications = postsData.slice(0, 5).map((post) => ({
+        id: post.postId,
+        title: post.message?.substring(0, 50) || "Untitled post",
+        adminName: post.adminName || "Admin",
+        adminProfile: post.adminProfile || "/default-profile.png",
+      }));
+
+      setNotifications(latestNotifications);
+    } catch (err) {
+      console.error("Error fetching notifications:", err);
+    }
+  };
+
+  fetchNotifications();
+}, []);
+
+// Handle notification click
+const handleNotificationClick = (postId, index) => {
+  setHighlightedPostId(postId);
+
+  // Scroll the post into view
+  const postElement = postRefs.current[postId];
+  if (postElement) {
+    postElement.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Remove clicked notification
+  const updatedNotifications = [...notifications];
+  updatedNotifications.splice(index, 1);
+  setNotifications(updatedNotifications);
+
+  // Close popup
+  setShowNotifications(false);
+
+  // Remove highlight after 3 seconds
+  setTimeout(() => setHighlightedPostId(null), 3000);
+};
 
 
   // ---------------- FETCH ADMINS ----------------
@@ -117,76 +196,91 @@ useEffect(() => {
 
     fetchAdmins();
   }, []);
-
-   // Scroll to bottom whenever messages update
+  // 🔹 Auto-scroll to bottom
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [popupMessages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  // Fetch chat messages whenever selected admin changes
+  // ---------------- Real-time messages ----------------
   useEffect(() => {
-    if (!selectedAdmin || !teacher) return;
+    if (!teacherUserId || !selectedChatUser) return;
+    const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
+    const messagesRef = ref(db, `Chats/${chatKey}/messages`);
+    const unsubscribe = onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const msgs = Object.entries(data)
+        .map(([id, m]) => ({
+          id,
+          ...m,
+          isTeacher: m.senderId === teacherUserId,
+        }))
+        .sort((a, b) => a.timeStamp - b.timeStamp);
+      setMessages(msgs);
+    });
+    return () => unsubscribe();
+  }, [teacherUserId, selectedChatUser]);
 
-    async function fetchMessages() {
-      try {
-        const chatKey =
-          teacher.userId < selectedAdmin.adminId
-            ? `${teacher.userId}_${selectedAdmin.adminId}`
-            : `${selectedAdmin.adminId}_${teacher.userId}`;
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-        const res = await axios.get(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
-        );
+  // ---------------- Send Message ----------------
+  const sendMessage = async () => {
+    if (!newMessageText.trim() || !selectedAdmin) return;
 
-        const msgs = Object.values(res.data || {})
-          .map((m) => ({
-            ...m,
-            sender: m.senderId === teacher.userId ? "teacher" : "admin",
-          }))
-          .sort((a, b) => a.timeStamp - b.timeStamp);
+    const senderId = teacherUserId;
+    const receiverId = selectedAdmin.userId;
+    const chatId = getChatId(senderId, receiverId);
+    const timeStamp = Date.now();
 
-        setPopupMessages(msgs);
-      } catch (err) {
-        console.error("Failed to fetch messages:", err);
-        setPopupMessages([]);
-      }
-    }
-
-    fetchMessages();
-  }, [selectedAdmin, teacher]);
-
-  // Send message
-  const handleSendMessage = async () => {
-    if (!popupInput.trim() || !teacher || !selectedAdmin) return;
-
-    const newMessage = {
-      senderId: teacher.userId,
-      receiverId: selectedAdmin.adminId,
-      text: popupInput,
-      timeStamp: Date.now(),
+    const message = {
+      senderId,
+      receiverId,
+      type: "text",
+      text: newMessageText,
+      imageUrl: null,
+      replyTo: null,
       seen: false,
+      edited: false,
+      deleted: false,
+      timeStamp,
     };
 
     try {
-      const chatKey =
-        teacher.userId < selectedAdmin.adminId
-          ? `${teacher.userId}_${selectedAdmin.adminId}`
-          : `${selectedAdmin.adminId}_${teacher.userId}`;
-
       await axios.post(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
-        newMessage
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}/messages.json`,
+        message
       );
-
-      // Update local state
-      setPopupMessages([...popupMessages, { ...newMessage, sender: "teacher" }]);
-      setPopupInput("");
+      await axios.patch(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}.json`,
+        {
+          participants: { [senderId]: true, [receiverId]: true },
+          lastMessage: { text: newMessageText, senderId, seen: false, timeStamp },
+          unread: { [senderId]: 0, [receiverId]: 1 },
+        }
+      );
+      setNewMessageText("");
     } catch (err) {
-      console.error("Failed to send message:", err);
+      console.error("Send message error:", err);
     }
   };
+
+  // ---------------- Mark Messages as Seen ----------------
+  useEffect(() => {
+    if (!selectedChatUser) return;
+    const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
+    const chatRef = ref(db, `Chats/${chatKey}/messages`);
+    const unsubscribe = onValue(chatRef, (snap) => {
+      const data = snap.val() || {};
+      Object.entries(data).forEach(([id, m]) => {
+        if (!m.seen && m.receiverId === teacherUserId) {
+          update(ref(db, `Chats/${chatKey}/messages/${id}`), { seen: true });
+        }
+      });
+    });
+    return () => unsubscribe();
+  }, [selectedChatUser, teacherUserId]);
+ 
 
   return (
     <div className="dashboard-page">
@@ -198,7 +292,118 @@ useEffect(() => {
                   <input type="text" placeholder="Search Teacher and Student..." />
                 </div>
                 <div className="nav-right">
-                  <div className="icon-circle"><FaBell /></div>
+      <div className="icon-circle">
+  <div
+    onClick={() => setShowNotifications(!showNotifications)}
+    style={{ cursor: "pointer", position: "relative" }}
+  >
+    <FaBell size={24} />
+    {notifications.length > 0 && (
+      <span
+        style={{
+          position: "absolute",
+          top: -5,
+          right: -5,
+          background: "red",
+          color: "white",
+          borderRadius: "50%",
+          width: 18,
+          height: 18,
+          fontSize: 12,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {notifications.length}
+      </span>
+    )}
+  </div>
+
+  {showNotifications && (
+  <div
+    style={{
+      position: "absolute",
+      top: 30,
+      right: 0,
+      width: 300,
+      maxHeight: 400,
+      overflowY: "auto",
+      background: "#fff",
+      boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+      borderRadius: 8,
+      zIndex: 100,
+    }}
+  >
+    {notifications.length > 0 ? (
+      notifications.map((post, index) => (
+        <div
+          key={post.id || index}
+          onClick={() => {
+            // Navigate to dashboard
+            navigate("/dashboard");
+
+            // Wait a tiny bit to ensure dashboard renders
+            setTimeout(() => {
+              const postElement = postRefs.current[post.id];
+              if (postElement) {
+                // Scroll post into view
+                postElement.scrollIntoView({ behavior: "smooth", block: "center" });
+
+                // Highlight the post
+                setHighlightedPostId(post.id);
+
+                // **Remove notification only after post is visible**
+                // Use another small delay to ensure display
+                setTimeout(() => {
+                  setNotifications(prev => {
+                    const updated = [...prev];
+                    updated.splice(index, 1); // remove the clicked notification
+                    return updated;
+                  });
+                }, 500); // 0.5s after scrolling
+
+                // Remove highlight after 3 seconds
+                setTimeout(() => setHighlightedPostId(null), 3000);
+              }
+            }, 100);
+
+            // Close popup immediately
+            setShowNotifications(false);
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            padding: "10px 15px",
+            borderBottom: "1px solid #eee",
+            cursor: "pointer",
+          }}
+        >
+          <img
+            src={post.adminProfile}
+            alt={post.adminName}
+            style={{
+              width: 35,
+              height: 35,
+              borderRadius: "50%",
+              marginRight: 10,
+            }}
+          />
+          <div>
+            <strong>{post.adminName}</strong>
+            <p style={{ margin: 0, fontSize: 12 }}>{post.title}</p>
+          </div>
+        </div>
+      ))
+    ) : (
+      <div style={{ padding: 15 }}>No notifications</div>
+    )}
+  </div>
+)}
+
+</div>
+
+
                   <div className="icon-circle"><FaFacebookMessenger /></div>
                   <div className="icon-circle"><FaCog /></div>
                   
@@ -274,7 +479,11 @@ useEffect(() => {
                   key={a.adminId}
                   admin={a}
                   selected={selectedAdmin?.adminId === a.adminId}
-                  onClick={setSelectedAdmin}
+                  onClick={(admin) => {
+  setSelectedAdmin(admin);       // for sidebar info
+  setSelectedChatUser(admin);    // for chat messages
+}}
+
                 />
               ))}
             </div>
@@ -380,20 +589,26 @@ useEffect(() => {
       <strong>{selectedAdmin.name}</strong>
       <div style={{ display: "flex", gap: "10px" }}>
         {/* Expand */}
-        <button
-          onClick={() => {
-            setAdminChatOpen(false);
-            navigate("/all-chat", { state: { user: selectedAdmin } });
-          }}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            fontSize: "18px",
-          }}
-        >
-          ⤢
-        </button>
+       <button
+  onClick={() => {
+    setAdminChatOpen(false); // close the popup
+    navigate("/all-chat", {
+      state: {
+        user: selectedAdmin, // user to auto-select
+        tab: "admin",        // tab type
+      },
+    });
+  }}
+  style={{
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "18px",
+  }}
+>
+  ⤢
+</button>
+
 
         {/* Close */}
         <button
@@ -411,50 +626,59 @@ useEffect(() => {
     </div>
 
     {/* MESSAGES */}
-    <div
-      style={{
-        flex: 1,
-        padding: "12px",
-        overflowY: "auto",
+    {/* MESSAGES */}
+<div
+  style={{
+    flex: 1,
+    padding: "12px",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    background: "#f9f9f9",
+  }}
+>
+  {messages.length === 0 ? (
+    <p style={{ textAlign: "center", color: "#aaa" }}>
+      Start chatting with {selectedAdmin.name}
+    </p>
+  ) :
+  messages.map(m => (
+  <div key={m.id} style={{
+    display: "flex",
+    flexDirection: m.isTeacher ? "row-reverse" : "row",
+    alignItems: "flex-end",
+    marginBottom: 10
+  }}>
+    <div style={{
+      background: m.isTeacher ? "#4facfe" : "#fff",
+      color: m.isTeacher ? "#fff" : "#000",
+      padding: "10px 14px",
+      borderRadius: 18,
+      maxWidth: "65%",
+      position: "relative",
+      boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
+    }}>
+      {m.text}
+      <div style={{
+        fontSize: 10,
+        color: "#888",
+        marginTop: 4,
         display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        background: "#f9f9f9",
-      }}
-    >
-      {popupMessages.length === 0 ? (
-        <p style={{ textAlign: "center", color: "#aaa" }}>
-          Start chatting with {selectedAdmin.name}
-        </p>
-      ) : (
-        popupMessages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              justifyContent:
-                m.senderId === teacher?.userId ? "flex-end" : "flex-start",
-            }}
-          >
-            <span
-              style={{
-                display: "inline-block",
-                padding: "8px 14px",
-                borderRadius: "20px",
-                background:
-                  m.senderId === teacher?.userId ? "#4b6cb7" : "#e5e5ea",
-                color: m.senderId === teacher?.userId ? "#fff" : "#000",
-                maxWidth: "70%",
-                wordWrap: "break-word",
-              }}
-            >
-              {m.text}
-            </span>
-          </div>
-        ))
-      )}
-      <div ref={messagesEndRef} />
+        justifyContent: "flex-end",
+        alignItems: "center",
+        gap: 4
+      }}>
+        {formatTime(m.timeStamp)}
+        {m.isTeacher && <FaCheck size={10} color={m.seen ? "#4facfe" : "#ccc"} />}
+      </div>
     </div>
+  </div>
+))}
+
+  <div ref={messagesEndRef} />
+</div>
+
 
     {/* INPUT */}
     <div
@@ -467,38 +691,41 @@ useEffect(() => {
       }}
     >
       <input
-        value={popupInput}
-        onChange={(e) => setPopupInput(e.target.value)}
-        placeholder="Type a message..."
-        style={{
-          flex: 1,
-          padding: "10px 14px",
-          borderRadius: "999px",
-          border: "1px solid #ccc",
-          outline: "none",
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleSendMessage();
-        }}
-      />
-      <button
-        onClick={handleSendMessage}
-        style={{
-          background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
-          border: "none",
-          borderRadius: "50%",
-          width: "42px",
-          height: "42px",
-          color: "#fff",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "18px",
-        }}
-      >
-        ➤
-      </button>
+  value={newMessageText}  // use the state that sendMessage uses
+  onChange={(e) => setNewMessageText(e.target.value)}
+  placeholder="Type a message..."
+  style={{
+    flex: 1,
+    padding: "10px 14px",
+    borderRadius: "999px",
+    border: "1px solid #ccc",
+    outline: "none",
+  }}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") sendMessage(); // send message on Enter
+  }}
+/>
+
+<button
+  onClick={sendMessage} // send message on button click
+  style={{
+    background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+    border: "none",
+    borderRadius: "50%",
+    width: "42px",
+    height: "42px",
+    color: "#fff",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "18px",
+  }}
+>
+  ➤
+</button>
+
+
     </div>
   </div>
 )}

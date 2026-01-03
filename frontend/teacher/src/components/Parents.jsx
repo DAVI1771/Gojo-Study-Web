@@ -2,6 +2,13 @@ import React, { useState, useEffect, useRef } from "react";
 import { FaHome, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell, FaClipboardCheck, FaUsers, FaFacebookMessenger, FaCommentDots } from "react-icons/fa";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
+import { ref, onValue, off } from "firebase/database";
+import { db } from "../firebase"; // adjust path
+
+const getChatId = (id1, id2) => {
+  return [id1, id2].sort().join("_");
+};
+
 
 function TeacherParent() {
   const [teacher, setTeacher] = useState(null);
@@ -16,7 +23,17 @@ const [activeTab, setActiveTab] = useState("Details"); // default tab
 const [children, setChildren] = useState([]);
 
   const navigate = useNavigate();
-
+  
+ const handleExpand = () => {
+    // Navigate to AllChat page
+    // Pass user info and tab type
+    navigate("/all-chat", {
+      state: {
+        user: selectedUser,
+        tab: selectedTab,
+      },
+    });
+  };
   // Load teacher from localStorage on mount
   useEffect(() => {
     const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
@@ -134,47 +151,114 @@ const [children, setChildren] = useState([]);
   }, [messages]);
 
   // Fetch messages for this teacher → parent chat
-  useEffect(() => {
-    if (!selectedParent) return;
+useEffect(() => {
+  if (!selectedParent || !teacher || !chatOpen) return;
 
-    const fetchMessages = async () => {
-      try {
-        const res = await axios.get(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${selectedParent.userId}_${teacher.userId}.json`
-        );
-        setMessages(res.data ? Object.values(res.data) : []);
-      } catch (err) {
-        console.error("Error fetching chat messages:", err);
-      }
-    };
+  const chatId = getChatId(teacher.userId, selectedParent.userId);
+  const messagesRef = ref(db, `Chats/${chatId}/messages`);
 
-    fetchMessages();
-  }, [selectedParent, teacher]);
+  const unsubscribe = onValue(messagesRef, (snapshot) => {
+    const data = snapshot.val();
+
+    if (data) {
+      const msgs = Object.entries(data).map(([id, msg]) => ({
+        messageId: id,
+        ...msg
+      }));
+
+      msgs.sort((a, b) => a.timeStamp - b.timeStamp);
+      setMessages(msgs);
+    } else {
+      setMessages([]);
+    }
+  });
+
+  markAsSeen(chatId);
+
+  return () => off(messagesRef);
+}, [selectedParent, teacher, chatOpen]);
+
 
   // Send a new message
-  const sendMessage = async (text) => {
-    if (!text.trim()) return;
+ const sendMessage = async (text) => {
+  if (!text.trim()) return;
 
-    const newMessage = {
-      messageId: Date.now(),
-      senderId: teacher.userId,
-      text,
-      timestamp: Date.now(),
-    };
+  const senderId = teacher.userId;
+  const receiverId = selectedParent.userId;
+  const chatId = getChatId(senderId, receiverId);
+  const timeStamp = Date.now();
 
-    setMessages((prev) => [...prev, newMessage]);
-    setNewMessageText("");
-
-    // Push to database
-    try {
-      await axios.post(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${selectedParent.userId}_${teacher.userId}.json`,
-        newMessage
-      );
-    } catch (err) {
-      console.error("Error sending message:", err);
-    }
+  const message = {
+    senderId,
+    receiverId,
+    type: "text",
+    text,
+    imageUrl: null,
+    replyTo: null,
+    seen: false,
+    edited: false,
+    deleted: false,
+    timeStamp
   };
+
+  try {
+    await axios.post(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}/messages.json`,
+      message
+    );
+
+    await axios.patch(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}.json`,
+      {
+        participants: {
+          [senderId]: true,
+          [receiverId]: true
+        },
+        lastMessage: {
+          text,
+          senderId,
+          seen: false,
+          timeStamp
+        },
+        unread: {
+          [senderId]: 0,
+          [receiverId]: 1
+        }
+      }
+    );
+
+    setNewMessageText("");
+  } catch (err) {
+    console.error("Send message error:", err.response?.data || err);
+  }
+};
+
+
+
+
+const markAsSeen = async (chatId) => {
+  try {
+    await axios.patch(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}/unread.json`,
+      {
+        [teacher.userId]: 0,
+      }
+    );
+
+    await axios.patch(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}/lastMessage.json`,
+      {
+        seen: true,
+      }
+    );
+  } catch (err) {
+    console.error("Mark as seen error:", err);
+  }
+};
+
+
+
+
 
 
 
@@ -493,20 +577,27 @@ const [children, setChildren] = useState([]);
 
             <div style={{ display: "flex", gap: "10px" }}>
               {/* Expand */}
+              
               <button
-                onClick={() => {
-                  setChatOpen(false);
-                  navigate("/all-chat", { state: { user: selectedParent } });
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: "18px",
-                }}
-              >
-                ⤢
-              </button>
+  onClick={() => {
+    setChatOpen(false); // properly close popup
+    navigate("/all-chat", {
+      state: {
+        user: selectedParent, // user to auto-select
+        tab: "parent",        // tab type
+      },
+    });
+  }}
+  style={{
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "18px",
+  }}
+>
+  ⤢
+</button>
+
 
               {/* Close */}
               <button

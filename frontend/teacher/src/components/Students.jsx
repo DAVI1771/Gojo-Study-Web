@@ -3,6 +3,23 @@ import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import { FaHome, FaFileAlt, FaChalkboardTeacher, FaCog, FaSignOutAlt, FaSearch, FaBell, FaUsers, FaClipboardCheck, FaStar, FaCheckCircle, FaTimesCircle, FaFacebookMessenger, FaCommentDots } from "react-icons/fa";
 import "../styles/global.css";
+import { ref, onValue, off, update } from "firebase/database";
+import { db } from "../firebase";
+
+const getChatId = (id1, id2) => {
+  return [id1, id2].sort().join("_");
+};
+
+const formatTime = (timeStamp) => {
+  if (!timeStamp) return "";
+  const date = new Date(timeStamp);
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
+const API_BASE = "http://127.0.0.1:5000/api";
+
 
 const StudentItem = ({ student, selected, onClick }) => (
   <div
@@ -41,6 +58,9 @@ const StudentItem = ({ student, selected, onClick }) => (
   </div>
 );
 
+
+
+
 function StudentsPage() {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,9 +68,9 @@ function StudentsPage() {
   const [selectedGrade, setSelectedGrade] = useState("All");
   const [selectedSection, setSelectedSection] = useState("All");
   const [sections, setSections] = useState([]);
-  const [selectedStudent, setSelectedStudent] = useState(null);
+
   const [studentTab, setStudentTab] = useState("details");
-  const [studentChatOpen, setStudentChatOpen] = useState(false);
+  
   const [popupMessages, setPopupMessages] = useState([]);
   const [popupInput, setPopupInput] = useState("");
   const [teacherInfo, setTeacherInfo] = useState(null);
@@ -65,15 +85,33 @@ function StudentsPage() {
   const [teacherNotes, setTeacherNotes] = useState([]);
   const [newTeacherNote, setNewTeacherNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const teacherUserId = teacherInfo?.userId; // ✅ teacher ID from logged-in teacher
+ 
   const [marksData, setMarksData] = useState({});
  
   const [teacher, setTeacher] = useState(null);
 
-  const [messages, setMessages] = useState([]);
-  const [newMessageText, setNewMessageText] = useState("");
-  const messagesEndRef = useRef(null);
 
+const [selectedStudent, setSelectedStudent] = useState(null);
+const [studentChatOpen, setStudentChatOpen] = useState(false);
+
+const [messages, setMessages] = useState([]);
+const [newMessageText, setNewMessageText] = useState("");
+const messagesEndRef = useRef(null);
+
+const teacherData = JSON.parse(localStorage.getItem("teacher")) || {};
+const teacherUserId = String(teacherData.userId || "");
+
+
+
+
+
+const [notifications, setNotifications] = useState([]);
+const [showNotifications, setShowNotifications] = useState(false);
+const [highlightedPostId, setHighlightedPostId] = useState(null);
+
+// Refs for posts (for scrolling/highlighting)
+const postRefs = useRef({});
+  
 
 const navigate = useNavigate();
 
@@ -96,6 +134,54 @@ useEffect(() => {
     }
     setTeacherInfo(storedTeacher);
   }, [navigate]);
+
+
+// Fetch notifications from posts
+useEffect(() => {
+  const fetchNotifications = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/get_posts`);
+      const postsData = res.data || [];
+
+      // Use last 5 posts as notifications
+      const latestNotifications = postsData.slice(0, 5).map((post) => ({
+        id: post.postId,
+        title: post.message?.substring(0, 50) || "Untitled post",
+        adminName: post.adminName || "Admin",
+        adminProfile: post.adminProfile || "/default-profile.png",
+      }));
+
+      setNotifications(latestNotifications);
+    } catch (err) {
+      console.error("Error fetching notifications:", err);
+    }
+  };
+
+  fetchNotifications();
+}, []);
+
+// Handle notification click
+const handleNotificationClick = (postId, index) => {
+  setHighlightedPostId(postId);
+
+  // Scroll the post into view
+  const postElement = postRefs.current[postId];
+  if (postElement) {
+    postElement.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Remove clicked notification
+  const updatedNotifications = [...notifications];
+  updatedNotifications.splice(index, 1);
+  setNotifications(updatedNotifications);
+
+  // Close popup
+  setShowNotifications(false);
+
+  // Remove highlight after 3 seconds
+  setTimeout(() => setHighlightedPostId(null), 3000);
+};
+
 
   // ---------------- FETCH STUDENTS ----------------
 useEffect(() => {
@@ -379,79 +465,69 @@ const saveTeacherNote = async () => {
 
 
  // Fetch messages for the selected student
-  useEffect(() => {
-    if (!selectedStudent) return;
+ useEffect(() => {
+  if (!teacherUserId || !selectedStudent) return;
 
-    const fetchMessages = async () => {
-      try {
-        const chatKey =
-  (teacher?.userId ?? 0) < (selectedStudent?.userId ?? 0)
-    ? `${teacher?.userId}_${selectedStudent?.userId}`
-    : `${selectedStudent?.userId}_${teacher?.userId}`;
+  const chatKey = getChatId(teacherUserId, selectedStudent.userId);
+  const messagesRef = ref(db, `Chats/${chatKey}/messages`);
+
+  const unsubscribe = onValue(messagesRef, (snapshot) => {
+    const data = snapshot.val() || {};
+    const msgs = Object.entries(data)
+      .map(([id, m]) => ({
+        id,
+        ...m,
+        isTeacher: m.senderId === teacherUserId,
+      }))
+      .sort((a, b) => a.timeStamp - b.timeStamp);
+
+    setMessages(msgs);
+  });
+
+  return () => unsubscribe();
+}, [teacherUserId, selectedStudent]);
 
 
-        const res = await axios.get(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
-        );
+useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+}, [messages]);
 
-        const msgs = res.data
-          ? Object.entries(res.data).map(([id, msg]) => ({
-              messageId: id,
-              ...msg,
-            }))
-          : [];
-
-        // Sort messages by timestamp
-        msgs.sort((a, b) => a.timeStamp - b.timeStamp);
-
-        setMessages(msgs);
-      } catch (err) {
-        console.error("Failed to fetch messages:", err);
-        setMessages([]);
-      }
-    };
-
-    fetchMessages();
-
-    // Optional: poll every 5 seconds to get new messages
-    const interval = setInterval(fetchMessages, 5000);
-    return () => clearInterval(interval);
-  }, [selectedStudent, teacher?.userId]);
 
   // Send message
-  const sendMessage = async (text) => {
-    if (!text.trim() || !selectedStudent) return;
+  const sendMessage = async () => {
+  if (!newMessageText.trim() || !selectedStudent) return;
 
-    const newMessage = {
-      senderId: teacher?.userId,
-      receiverId: selectedStudent?.userId,
-      text: text.trim(),
-      timeStamp: Date.now(),
-      seen: false,
-    };
+  const senderId = teacherUserId;
+  const receiverId = selectedStudent.userId;
+  const chatId = getChatId(senderId, receiverId);
+  const timeStamp = Date.now();
 
-    const chatKey =
-  (teacher?.userId ?? 0) < (selectedStudent?.userId ?? 0)
-    ? `${teacher?.userId}_${selectedStudent?.userId}`
-    : `${selectedStudent?.userId}_${teacher?.userId}`;
-
-    try {
-      const res = await axios.post(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
-        newMessage
-      );
-
-      // Add message locally
-      setMessages((prev) => [
-        ...prev,
-        { ...newMessage, messageId: res.data.name },
-      ]);
-      setNewMessageText("");
-      scrollToBottom();
-    } catch (err) {
-      console.error("Failed to send message:", err);
-    }
+  const message = {
+    senderId,
+    receiverId,
+    type: "text",
+    text: newMessageText,
+    seen: false,
+    timeStamp,
   };
+
+  await axios.post(
+    `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}/messages.json`,
+    message
+  );
+
+  await axios.patch(
+    `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatId}.json`,
+    {
+      participants: { [senderId]: true, [receiverId]: true },
+      lastMessage: { text: newMessageText, senderId, seen: false, timeStamp },
+      unread: { [receiverId]: 1 },
+    }
+  );
+
+  setNewMessageText("");
+};
+
 
 
 
@@ -513,7 +589,92 @@ const InfoRow = ({ label, value }) => (
               <input type="text" placeholder="Search Teacher and Student..." />
             </div>
             <div className="nav-right">
-              <div className="icon-circle"><FaBell /></div>
+             {/* Notification Bell & Popup */}
+<div className="icon-circle">
+  <div
+    onClick={() => setShowNotifications(!showNotifications)}
+    style={{ cursor: "pointer", position: "relative" }}
+  >
+    <FaBell size={24} />
+    {notifications.length > 0 && (
+      <span
+        style={{
+          position: "absolute",
+          top: -5,
+          right: -5,
+          background: "red",
+          color: "white",
+          borderRadius: "50%",
+          width: 18,
+          height: 18,
+          fontSize: 12,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {notifications.length}
+      </span>
+    )}
+  </div>
+
+  {showNotifications && (
+    <div
+      style={{
+        position: "absolute",
+        top: 30,
+        right: 0,
+        width: 300,
+        maxHeight: 400,
+        overflowY: "auto",
+        background: "#fff",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+        borderRadius: 8,
+        zIndex: 100,
+      }}
+    >
+      {notifications.length > 0 ? (
+        notifications.map((post, index) => (
+          <div
+            key={post.id || index}
+            onClick={() => {
+              // Navigate to dashboard first
+              navigate("/dashboard");
+
+              // Highlight and scroll the post after a small delay to allow navigation
+              setTimeout(() => handleNotificationClick(post.id, index), 100);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "10px 15px",
+              borderBottom: "1px solid #eee",
+              cursor: "pointer",
+            }}
+          >
+            <img
+              src={post.adminProfile}
+              alt={post.adminName}
+              style={{
+                width: 35,
+                height: 35,
+                borderRadius: "50%",
+                marginRight: 10,
+              }}
+            />
+            <div>
+              <strong>{post.adminName}</strong>
+              <p style={{ margin: 0, fontSize: 12 }}>{post.title}</p>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div style={{ padding: 15 }}>No notifications</div>
+      )}
+    </div>
+  )}
+</div>
+
               <div className="icon-circle"><FaFacebookMessenger /></div>
               <div className="icon-circle"><FaCog /></div>
               
@@ -604,9 +765,15 @@ const InfoRow = ({ label, value }) => (
             {error && <p style={{ color: "red" }}>{error}</p>}
             {!loading && !error && filteredStudents.length === 0 && <p>No students found.</p>}
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {filteredStudents.map(s => (
-                <StudentItem key={s.userId} student={s} selected={selectedStudent?.userId === s.userId} onClick={setSelectedStudent} />
-              ))}
+              {filteredStudents.map((s, index) => (
+  <StudentItem
+    key={s.userId || s.id || index}
+    student={s}
+    selected={selectedStudent?.userId === s.userId}
+    onClick={() => setSelectedStudent(s)}
+  />
+))}
+
             </div>
           </div>
 
@@ -1414,19 +1581,24 @@ const InfoRow = ({ label, value }) => (
             <div style={{ display: "flex", gap: "10px" }}>
               {/* Expand */}
               <button
-                onClick={() => {
-                  setChatOpen(false);
-                  navigate("/all-chat", { state: { user: selectedStudent } });
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: "18px",
-                }}
-              >
-                ⤢
-              </button>
+  onClick={() => {
+    setChatOpen(false); // properly close popup
+    navigate("/all-chat", {
+      state: {
+        user: selectedStudent, // user to auto-select
+        tab: "student",        // tab type
+      },
+    });
+  }}
+  style={{
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "18px",
+  }}
+>
+  ⤢
+</button>
 
               {/* Close */}
               <button

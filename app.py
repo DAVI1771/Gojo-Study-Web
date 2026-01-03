@@ -24,6 +24,7 @@ firebase_admin.initialize_app(cred, {
     "storageBucket": "ethiostore-17d9f.appspot.com"
 })
 bucket = storage.bucket()
+posts_ref = db.reference("/TeacherPosts")
 
 
 # ===================== HOME PAGE =====================
@@ -438,6 +439,33 @@ def get_posts():
 
     result.sort(key=lambda x: x["timestamp"], reverse=True)
     return jsonify(result)
+
+
+@app.route("/api/mark_teacher_post_seen", methods=["POST"])
+def mark_teacher_post_seen():
+    try:
+        data = request.get_json()
+        post_id = data.get("postId")
+        teacher_id = data.get("teacherId")
+
+        if not post_id or not teacher_id:
+            return jsonify({"success": False, "message": "Missing postId or teacherId"}), 400
+
+        post_ref = posts_ref.child(post_id)
+        post = post_ref.get()
+
+        if not post:
+            return jsonify({"success": False, "message": "Post not found"}), 404
+
+        seen_by = post.get("seenBy", {})
+        seen_by[teacher_id] = True
+        post_ref.update({"seenBy": seen_by})
+
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 # ===================== PARENT REGISTRATION =====================

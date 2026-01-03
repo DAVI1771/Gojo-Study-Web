@@ -7,10 +7,13 @@ import Dashboard from "../components/Dashboard";
 import Students from "../components/Students";
 import Marks from "../components/MarksPage";
 import Attendance from "../components/AttendancePage";
-import TeacherChatPage from "../components/TeacherChatPage"; // ✅ Chat
-import AdminPage from "../components/AdminPage"; // ✅ Admin
-import TeacherNotesPage from "../components/TeacherNotesPage"; // ✅ NEW Notes Page
-import Parents from "../components//Parents";
+import AdminPage from "../components/AdminPage";
+import TeacherNotesPage from "../components/TeacherNotesPage";
+import Parents from "../components/Parents";
+import SettingsPage from "../components/SettingsPage";
+// ✅ Chat Pages
+import AllChat from "../components/AllChat";
+
 export default function AppRoutes() {
   return (
     <Router>
@@ -28,8 +31,10 @@ export default function AppRoutes() {
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/notes" element={<TeacherNotesPage />} /> {/* ✅ Teacher Notes */}
         <Route path="/parents" element={<Parents />} /> 
+         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="all-chat" element={<AllChat />} />
         {/* Chat */}
-        <Route path="/teacher-chat" element={<TeacherChatPage />} />
+        
       </Routes>
     </Router>
   );
