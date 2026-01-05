@@ -456,6 +456,9 @@ const handleNotificationClick = (postId, index) => {
                     <Link className="sidebar-btn" to="/attendance">
                       <FaUsers /> Attendance
                     </Link>
+                    <Link className="sidebar-btn" to="/schedule" >
+                                                     <FaUsers /> Schedule
+                                                   </Link>
                     <Link className="sidebar-btn" to="/settings">
                       <FaCog /> Settings
                     </Link>

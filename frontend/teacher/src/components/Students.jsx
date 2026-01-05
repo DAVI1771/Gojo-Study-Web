@@ -372,7 +372,7 @@ useEffect(() => {
       const marks = {};
 
       Object.entries(res.data || {}).forEach(([courseId, students]) => {
-        if (students[selectedStudent.studentId]) { // ✅ FIXED
+        if (students[selectedStudent.studentId]) {
           marks[courseId] = students[selectedStudent.studentId];
         }
       });
@@ -386,7 +386,6 @@ useEffect(() => {
 
   fetchMarks();
 }, [selectedStudent]);
-
 
 const statusColor = status => status === "present" ? "#34a853" : status === "absent" ? "#ea4335" : "#fbbc05";
 
@@ -727,6 +726,9 @@ const InfoRow = ({ label, value }) => (
                 <Link className="sidebar-btn" to="/attendance">
                   <FaUsers /> Attendance
                 </Link>
+                <Link className="sidebar-btn" to="/schedule" >
+                                                 <FaUsers /> Schedule
+                                               </Link>
                 <Link className="sidebar-btn" to="/settings">
                   <FaCog /> Settings
                 </Link>
@@ -1259,31 +1261,46 @@ const InfoRow = ({ label, value }) => (
             {/* Teacher + Status */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
               <span style={{ fontSize: "14px", color: "#374151" }}>👨‍🏫 {a.teacherName}</span>
-              <span
-                style={{
-                  padding: "5px 16px",
-                  borderRadius: "999px",
-                  fontSize: "14px",
-                  fontWeight: "700",
-                  backgroundColor: a.status.toLowerCase() === "present" ? "#16a34a" : "#dc2626",
-                  color: "#fff",
-                }}
-              >
-                {a.status.toUpperCase()}
-              </span>
+             <span
+  style={{
+    padding: "5px 16px",
+    borderRadius: "999px",
+    fontSize: "14px",
+    fontWeight: "700",
+    backgroundColor:
+      a.status.toLowerCase() === "present"
+        ? "#16a34a"
+        : a.status.toLowerCase() === "late"
+        ? "#f59e0b"
+        : "#dc2626", // red for absent
+    color: "#fff",
+  }}
+>
+  {a.status.toUpperCase()}
+</span>
             </div>
 
             {/* Progress Bar */}
             <div style={{ height: "8px", borderRadius: "12px", background: "#e5e7eb", overflow: "hidden" }}>
-              <div
-                style={{
-                  width: a.status.toLowerCase() === "present" ? "100%" : "0%",
-                  height: "100%",
-                  background: a.status.toLowerCase() === "present" ? "#16a34a" : "#dc2626",
-                  transition: "width 0.4s ease",
-                }}
-              />
-            </div>
+  <div
+    style={{
+      width:
+        a.status.toLowerCase() === "present"
+          ? "100%"
+          : a.status.toLowerCase() === "late"
+          ? "50%"
+          : "0%", // 50% for late
+      height: "100%",
+      background:
+        a.status.toLowerCase() === "present"
+          ? "#16a34a"
+          : a.status.toLowerCase() === "late"
+          ? "#f59e0b"
+          : "#dc2626",
+      transition: "width 0.4s ease",
+    }}
+  />
+</div>
           </div>
         ))}
 
@@ -1295,226 +1312,182 @@ const InfoRow = ({ label, value }) => (
 
 
       {/* PERFORMANCE TAB */}
-      {studentTab === "performance" && (
+   {studentTab === "performance" && (
+  <div style={{ position: "relative", paddingBottom: "70px", background: "#f8fafc" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: "20px",
+        padding: "20px",
+      }}
+    >
+      {Object.keys(studentMarks).length === 0 ? (
         <div
           style={{
-            position: "relative",
-            paddingBottom: "70px",
-            background: "#f8fafc",
+            textAlign: "center",
+            padding: "30px",
+            borderRadius: "18px",
+            background: "#ffffff",
+            color: "#475569",
+            fontSize: "16px",
+            fontWeight: "600",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
           }}
         >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "20px",
-              padding: "20px",
-            }}
-          >
-            {Object.keys(studentMarks).length === 0 ? (
-              <>
+          🚫 No Performance Records
+        </div>
+      ) : (
+        Object.entries(studentMarks).map(([courseId, marks], idx) => {
+          const assessments = marks.assessments || {};
+          const total = Object.values(assessments).reduce((sum, a) => sum + (a.score || 0), 0);
+          const maxTotal = Object.values(assessments).reduce((sum, a) => sum + (a.max || 0), 0);
+          const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+
+          const statusColor =
+            percentage >= 75
+              ? "#16a34a"
+              : percentage >= 50
+              ? "#f59e0b"
+              : "#dc2626";
+
+          return (
+            <div
+              key={idx}
+              style={{
+                padding: "18px",
+                borderRadius: "20px",
+                background: "#ffffff",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+                color: "#0f172a",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "16px",
+                  fontWeight: "800",
+                  marginBottom: "14px",
+                  textTransform: "capitalize",
+                  color: "#2563eb",
+                }}
+              >
+                {courseId.replace("course_", "").replace(/_/g, " ")}
+              </div>
+
+              {/* Score Circle */}
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
                 <div
                   style={{
-                    textAlign: "center",
-                    padding: "30px",
-                    borderRadius: "18px",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+                    width: "90px",
+                    height: "90px",
+                    borderRadius: "50%",
+                    background: `conic-gradient(${statusColor} ${percentage * 3.6}deg, #e5e7eb 0deg)`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
-                  🚫 No Performance Records
-                </div>
-
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "30px",
-                    borderRadius: "18px",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                  }}
-                >
-                  🚫 No Performance Records
-                </div>
-              </>
-            ) : (
-              Object.entries(studentMarks).map(([courseId, marks], idx) => {
-                const total =
-                  (marks.mark20 || 0) + (marks.mark30 || 0) + (marks.mark50 || 0);
-                const percentage = Math.min(total, 100);
-                const statusColor =
-                  percentage >= 75
-                    ? "#16a34a"
-                    : percentage >= 50
-                    ? "#f59e0b"
-                    : "#dc2626";
-
-                return (
                   <div
-                    key={idx}
                     style={{
-                      padding: "18px",
-                      borderRadius: "20px",
+                      width: "66px",
+                      height: "66px",
+                      borderRadius: "50%",
                       background: "#ffffff",
-                      boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
-                      color: "#0f172a",
-                      transition: "all 0.3s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "translateY(-6px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = "translateY(0)";
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    {/* Course Name */}
-                    <div
-                      style={{
-                        fontSize: "16px",
-                        fontWeight: "800",
-                        marginBottom: "14px",
-                        textTransform: "capitalize",
-                        color: "#2563eb",
-                      }}
-                    >
-                      {courseId.replace("course_", "").replace(/_/g, " ")}
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: statusColor }}>
+                      {total}
                     </div>
-
-                    {/* Score Circle */}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                        marginBottom: "16px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "90px",
-                          height: "90px",
-                          borderRadius: "50%",
-                          background: `conic-gradient(
-                          ${statusColor} ${percentage * 3.6}deg,
-                          #e5e7eb 0deg
-                        )`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "66px",
-                            height: "66px",
-                            borderRadius: "50%",
-                            background: "#ffffff",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "18px",
-                              fontWeight: "800",
-                              color: statusColor,
-                            }}
-                          >
-                            {total}
-                          </div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>
-                            / 100
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Marks Bars */}
-                    {[
-                      { key: "mark20", label: "Quiz", max: 20, color: "#2563eb" },
-                      { key: "mark30", label: "Test", max: 30, color: "#16a34a" },
-                      { key: "mark50", label: "Final", max: 50, color: "#ea580c" },
-                    ].map(({ key, label, max, color }) => (
-                      <div key={key} style={{ marginBottom: "10px" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            color: "#334155",
-                          }}
-                        >
-                          <span>{label}</span>
-                          <span>
-                            {marks[key]} / {max}
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            height: "6px",
-                            borderRadius: "999px",
-                            background: "#e5e7eb",
-                            marginTop: "5px",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${(marks[key] / max) * 100}%`,
-                              height: "100%",
-                              background: color,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Status */}
-                    <div
-                      style={{
-                        marginTop: "12px",
-                        textAlign: "center",
-                        fontSize: "13px",
-                        fontWeight: "700",
-                        color: statusColor,
-                      }}
-                    >
-                      {percentage >= 75
-                        ? "Excellent"
-                        : percentage >= 50
-                        ? "Good"
-                        : "Needs Improvement"}
-                    </div>
-
-                    {/* Teacher */}
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        textAlign: "center",
-                        fontSize: "12px",
-                        color: "#64748b",
-                      }}
-                    >
-                      👨‍🏫 {marks.teacherName}
+                    <div style={{ fontSize: "11px", color: "#64748b" }}>
+                      / {maxTotal}
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
+                </div>
+              </div>
 
-        
+              {/* Marks Bars */}
+              {Object.entries(assessments).map(([key, a]) => (
+                <div key={key} style={{ marginBottom: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#334155",
+                    }}
+                  >
+                    <span>{a.name}</span>
+                    <span>
+                      {a.score} / {a.max}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: "6px",
+                      borderRadius: "999px",
+                      background: "#e5e7eb",
+                      marginTop: "5px",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(a.score / a.max) * 100}%`,
+                        height: "100%",
+                        background:
+                          a.max >= 50
+                            ? "#ea580c"
+                            : a.max >= 30
+                            ? "#16a34a"
+                            : "#2563eb",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
 
-        </div>
+              {/* Status */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  textAlign: "center",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  color: statusColor,
+                }}
+              >
+                {percentage >= 75
+                  ? "Excellent"
+                  : percentage >= 50
+                  ? "Good"
+                  : "Needs Improvement"}
+              </div>
+
+              {/* Teacher */}
+              <div
+                style={{
+                  marginTop: "6px",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  color: "#64748b",
+                }}
+              >
+                👨‍🏫 {marks.teacherName}
+              </div>
+            </div>
+          );
+        })
       )}
+    </div>
+  </div>
+)}
+
     </div>
 
 

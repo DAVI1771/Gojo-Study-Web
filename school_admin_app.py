@@ -8,8 +8,11 @@ import uuid
 from datetime import datetime
 import sys
 
+
+
+
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
+CORS(app)
 
 # ---------------- FIREBASE ---------------- #
 firebase_json = "ethiostore-17d9f-firebase-adminsdk-5e87k-ff766d2648.json"
@@ -42,6 +45,10 @@ def upload_file_to_firebase(file, folder=""):
     except Exception as e:
         print("Upload Error:", e)
         return ""
+
+
+
+
 
 # ---------------- REGISTER ADMIN ---------------- #
 @app.route("/api/register", methods=["POST"])
@@ -405,6 +412,10 @@ def get_unread_messages(adminId):
     unread_msgs = [msg for key, msg in all_msgs.items()
                    if msg.get("receiverId") == adminId and not msg.get("read", False)]
     return jsonify({"count": len(unread_msgs), "messages": unread_msgs})
+
+
+
+
 
 # ---------------- RUN ---------------- #
 if __name__ == "__main__":

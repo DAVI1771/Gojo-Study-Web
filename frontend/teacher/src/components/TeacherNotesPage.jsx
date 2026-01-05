@@ -303,6 +303,9 @@ const handleNotificationClick = (postId, index) => {
             </Link>
             <Link className="sidebar-btn" to="/marks"><FaClipboardCheck /> Marks</Link>
             <Link className="sidebar-btn" to="/attendance"><FaUsers /> Attendance</Link>
+            <Link className="sidebar-btn" to="/schedule" >
+                                             <FaUsers /> Schedule
+                                           </Link>
             <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
             <button className="sidebar-btn logout-btn" onClick={handleLogout}><FaSignOutAlt /> Logout</button>
           </div>
