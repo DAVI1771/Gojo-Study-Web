@@ -16,10 +16,15 @@ function Login() {
       });
 
       if (res.data.success) {
+      console.log("Backend response:", res.data);
+      console.log("Backend userId:", res.data.userId);
+      console.log("Backend adminId:", res.data.adminId);
+      
        localStorage.setItem(
   "admin",
   JSON.stringify({
     userId: res.data.userId,   // ✅ REQUIRED
+    adminId: res.data.adminId, // ✅ REQUIRED - From School_Admin node
     name: res.data.name,
     username: res.data.username,
     profileImage: res.data.profileImage || "/default-profile.png",

@@ -49,9 +49,9 @@ const fetchPostNotifications = async () => {
     console.log("Notifications fetched:", res.data);
 
     // Ensure all objects have notificationId
-    const notifications = (res.data || []).map(n => ({
+    const notifications = (res.data || []).map((n, index) => ({
       ...n,
-      notificationId: n.notificationId || n.id
+      notificationId: n.notificationId || n.id || `notification-${index}-${Date.now()}`
     }));
 
     setPostNotifications(notifications);

@@ -16,10 +16,11 @@ import { useLocation } from "react-router-dom";
 function Dashboard() {
   // ---------------- STATE ----------------
 const [admin, setAdmin] = useState({
-  userId: "",
+  adminId: "",
   name: "",
   username: "",
   profileImage: "/default-profile.png",
+  isActive: false,
 });
 
   const [posts, setPosts] = useState([]);
@@ -60,10 +61,83 @@ useEffect(() => {
   }
 }, [postId]);
   // ---------------- HELPER: LOAD ADMIN FROM LOCALSTORAGE ----------------
-  const loadAdminFromStorage = () => {
+  const loadAdminFromStorage = async () => {
+    console.log("Loading admin from storage...");
     const storedAdmin = localStorage.getItem("admin");
+    console.log("Stored admin data:", storedAdmin);
+    
     if (storedAdmin) {
-      setAdmin(JSON.parse(storedAdmin));
+      try {
+        const adminData = JSON.parse(storedAdmin);
+        console.log("Parsed admin data:", adminData);
+        
+        // If we have adminId, get it directly from School_Admin
+        if (adminData.adminId) {
+          console.log("Getting admin data for adminId:", adminData.adminId);
+          
+          // Get specific admin from School_Admin using adminId
+          const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admin/${adminData.adminId}.json`);
+          console.log("School_Admin response:", res.data);
+          
+          if (res.data) {
+            // Get user details from Users node using userId from School_Admin
+            if (res.data.userId) {
+              console.log("Fetching user data for userId:", res.data.userId);
+              const userRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${res.data.userId}.json`);
+              console.log("Users response:", userRes.data);
+              
+              if (userRes.data) {
+                // Combine School_Admin data with Users data
+                const combinedAdmin = {
+                  adminId: adminData.adminId, // Use the adminId from localStorage/Posts
+                  ...res.data,
+                  name: userRes.data.name || res.data.name,
+                  username: userRes.data.username,
+                  profileImage: userRes.data.profileImage || res.data.profileImage,
+                };
+                console.log("Combined admin data:", combinedAdmin);
+                setAdmin(combinedAdmin);
+              } else {
+                console.log("Using School_Admin data only");
+                setAdmin({
+                  adminId: adminData.adminId,
+                  ...res.data
+                });
+              }
+            } else {
+              console.log("No userId in School_Admin, using School_Admin data only");
+              setAdmin({
+                adminId: adminData.adminId,
+                ...res.data
+              });
+            }
+          } else {
+            console.log("Admin not found in School_Admin, clearing storage");
+            localStorage.removeItem("admin");
+            setAdmin({
+              adminId: "",
+              name: "",
+              username: "",
+              profileImage: "/default-profile.png",
+              isActive: false,
+            });
+          }
+        } else {
+          console.log("No adminId in stored admin data");
+          localStorage.removeItem("admin");
+          setAdmin({
+            adminId: "",
+            name: "",
+            username: "",
+            profileImage: "/default-profile.png",
+            isActive: false,
+          });
+        }
+      } catch (err) {
+        console.error("Error loading admin from School_Admin:", err);
+      }
+    } else {
+      console.log("No admin found in localStorage");
     }
   };
 
@@ -96,7 +170,7 @@ const fetchPosts = async () => {
 
   // ---------------- FETCH UNREAD MESSAGES ----------------
 const fetchUnreadMessages = async () => {
-  if (!admin.userId) return;
+  if (!admin.adminId) return;
 
   const senders = {};
 
@@ -223,13 +297,13 @@ useEffect(() => {
 
 
 useEffect(() => {
-  if (!admin.userId) return;
+  if (!admin.adminId) return;
 
   fetchUnreadMessages();
   const interval = setInterval(fetchUnreadMessages, 5000);
 
   return () => clearInterval(interval);
-}, [admin.userId]);
+}, [admin.adminId]);
 
 
 
@@ -419,27 +493,92 @@ useEffect(() => {
     fetchPosts();
   }, []);
 
+  // Add this effect to monitor admin state changes
+  useEffect(() => {
+    console.log("Admin state updated:", admin);
+    if (!admin.userId) {
+      console.log("Admin not loaded, checking localStorage...");
+      const storedAdmin = localStorage.getItem("admin");
+      console.log("localStorage admin:", storedAdmin);
+      if (storedAdmin) {
+        console.log("Found admin in localStorage, reloading...");
+        loadAdminFromStorage();
+      } else {
+        console.log("No admin in localStorage, redirecting to login...");
+        window.location.href = "/login";
+      }
+    }
+  }, [admin.userId]);
+
  //
 const handlePost = async () => {
+  console.log("handlePost called");
+  console.log("postText:", postText);
+  console.log("postMedia:", postMedia);
+  console.log("admin state:", admin);
+  
   if (!postText && !postMedia) return alert("Enter message or select media");
+  
+  // Check if admin is loaded - use localStorage data directly if needed
+  if (!admin.adminId || !admin.userId || admin.userId === '' || admin.userId === undefined) {
+    console.log("Admin not loaded properly, using localStorage fallback...");
+    
+    // Try to get admin data directly from localStorage
+    const storedAdmin = localStorage.getItem("admin");
+    if (storedAdmin) {
+      const adminData = JSON.parse(storedAdmin);
+      console.log("Using stored admin data directly:", adminData);
+      
+      // Use stored data directly for posting
+      if (adminData.adminId) {
+        const formData = new FormData();
+        formData.append("message", postText);
+        formData.append("adminId", adminData.adminId);
+        formData.append("adminName", adminData.name || "Admin");
+        formData.append("adminProfile", adminData.profileImage || "/default-profile.png");
+        
+        if (postMedia) formData.append("post_media", postMedia);
+        
+        try {
+          console.log("Sending request with stored admin data...");
+          const response = await axios.post("http://127.0.0.1:5000/api/create_post", formData);
+          console.log("Response:", response);
+          setPostText("");
+          setPostMedia(null);
+          fetchPosts();
+          return;
+        } catch (err) {
+          console.error("Error creating post:", err);
+          alert("Error creating post: " + (err.response?.data?.message || err.message));
+        }
+      }
+    }
+    
+    return alert("Please log in again to refresh admin data.");
+  }
 
   const formData = new FormData();
   formData.append("message", postText);
 
-  formData.append("adminId", admin.userId);
+  console.log("Appending adminId:", admin.adminId);
+  formData.append("adminId", admin.adminId);
 
+  console.log("Appending adminName:", admin.name);
   formData.append("adminName", admin.name);
   formData.append("adminProfile", admin.profileImage);
 
   if (postMedia) formData.append("post_media", postMedia);
 
   try {
-    await axios.post("http://127.0.0.1:5000/api/create_post", formData);
+    console.log("Sending request to backend...");
+    const response = await axios.post("http://127.0.0.1:5000/api/create_post", formData);
+    console.log("Response:", response);
     setPostText("");
     setPostMedia(null);
     fetchPosts();
   } catch (err) {
-    console.error(err);
+    console.error("Error creating post:", err);
+    alert("Error creating post: " + (err.response?.data?.message || err.message));
   }
 };
 
@@ -449,7 +588,7 @@ const handlePost = async () => {
 const handleLike = async (postId) => {
   try {
    const res = await axios.post("http://127.0.0.1:5000/api/like_post", {
-  adminId: admin.userId,
+  adminId: admin.adminId,
   postId,
 });
 
@@ -483,7 +622,7 @@ const handleLike = async (postId) => {
   const handleDelete = async (postId) => {
     try {
       await axios.delete(`http://127.0.0.1:5000/api/delete_post/${postId}`, {
-       data: { adminId: admin.userId },
+       data: { adminId: admin.adminId },
 
       });
       fetchPosts();
@@ -498,7 +637,7 @@ const handleLike = async (postId) => {
     if (!newText) return;
     try {
       await axios.post(`http://127.0.0.1:5000/api/edit_post/${postId}`, {
-       adminId: admin.userId,
+       adminId: admin.adminId,
 
         postText: newText,
       });

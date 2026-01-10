@@ -140,18 +140,23 @@ def create_post():
 
         post_ref = posts_ref.push()
         time_now = datetime.now().strftime("%I:%M %p, %b %d %Y")
+        
+        # Get admin's userId from School_Admin node
+        admin_data = school_admin_ref.child(adminId).get()
+        admin_user_id = admin_data.get("userId") if admin_data else adminId
+        
         post_ref.set({
-    "postId": post_ref.key,
-    "message": text,
-    "postUrl": post_url,
-    "adminId": adminId,
-    "time": time_now,
-    "likeCount": 0,
-    "likes": {},
-    "seenBy": {
-        adminId: True  # creator has already seen it
-    }
-})
+            "postId": post_ref.key,
+            "message": text,
+            "postUrl": post_url,
+            "adminId": adminId,
+            "time": time_now,
+            "likeCount": 0,
+            "likes": {},
+            "seenBy": {
+                admin_user_id: True  # Use admin's userId from Users node
+            }
+        })
 
         return jsonify({"success": True, "message": "Post created successfully"})
     except Exception as e:
@@ -164,19 +169,29 @@ def get_posts():
     post_list = []
 
     for key, post in all_posts.items():
-        user_data = users_ref.child(post.get("adminId")).get() or {}
+        # Get admin's userId from post
+        admin_user_id = None
+        admins = school_admin_ref.get() or {}
+        for admin_id, admin_data in admins.items():
+            if admin_data.get("adminId") == post.get("adminId"):
+                admin_user_id = admin_data.get("userId")
+                break
+        
+        # Get user data from Users node using admin's userId
+        user_data = users_ref.child(admin_user_id).get() or {} if admin_user_id else {}
+        
         post_list.append({
-    "postId": key,
-    "message": post.get("message"),
-    "postUrl": post.get("postUrl"),
-    "adminId": post.get("adminId"),
-    "adminName": post.get("adminName") or user_data.get("name", "Admin"),
-    "adminProfile": post.get("adminProfile") or user_data.get("profileImage", "/default-profile.png"),
-    "time": post.get("time"),
-    "likes": post.get("likes", {}),
-    "likeCount": post.get("likeCount", 0),
-    "seenBy": post.get("seenBy", {})   # 🔥 THIS LINE
-})
+            "postId": key,
+            "message": post.get("message"),
+            "postUrl": post.get("postUrl"),
+            "adminId": post.get("adminId"),
+            "adminName": user_data.get("name", "Admin"),
+            "adminProfile": user_data.get("profileImage", "/default-profile.png"),
+            "time": post.get("time"),
+            "likes": post.get("likes", {}),
+            "likeCount": post.get("likeCount", 0),
+            "seenBy": post.get("seenBy", {})   # 🔥 THIS LINE
+        })
 
 
 
