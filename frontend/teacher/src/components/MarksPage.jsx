@@ -1,674 +1,772 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
-import { FaHome, FaCog, FaSignOutAlt, FaSave, FaBell, FaSearch, FaClipboardCheck, FaUsers, FaChalkboardTeacher, FaFacebookMessenger } from "react-icons/fa";
+import {
+  FaPlus,
+  FaTrash,
+  FaSave,
+  FaEdit,
+  FaHome,
+  FaCog,
+  FaSignOutAlt,
+  FaBell,
+  FaSearch,
+  FaClipboardCheck,
+  FaUsers,
+  FaChalkboardTeacher,
+  FaFacebookMessenger,
+} from "react-icons/fa";
 import "../styles/global.css";
 
-// ---------------- GRADE CALCULATION ----------------
-const calculateGrade = (total) => {
-  if (total >= 90) return "A";
-  if (total >= 80) return "B";
-  if (total >= 70) return "C";
-  if (total >= 60) return "D";
-  return "F";
-};
-
-function MarksPage() {
-  const [teacherInfo, setTeacherInfo] = useState(null);
-  const [students, setStudents] = useState([]);
+export default function MarksPage() {
+  const [teacher, setTeacher] = useState(null);
   const [courses, setCourses] = useState([]);
-  const [marks, setMarks] = useState({});
+  const [students, setStudents] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
-  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [assessmentList, setAssessmentList] = useState([]);
+  const [studentMarks, setStudentMarks] = useState({});
+  const [structureSubmitted, setStructureSubmitted] = useState(false);
   const navigate = useNavigate();
-  
-const [studentMarks, setStudentMarks] = useState({});
-const [studentTab, setStudentTab] = useState("performance");
-const [teacher, setTeacher] = useState(null);
 
-
-  // Load teacher from localStorage on mount
-  useEffect(() => {
-    const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
-    if (storedTeacher) {
-      setTeacher(storedTeacher);
-    }
-  }, []);
-
-  // Optional chaining to prevent crash if teacher is null
-  const teacherId = teacher?.userId;
-  // ---------------- LOAD LOGGED-IN TEACHER ----------------
+  // ---------------- LOAD TEACHER ----------------
   useEffect(() => {
     const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
     if (!storedTeacher) {
       navigate("/login");
       return;
     }
-    setTeacherInfo(storedTeacher);
+    setTeacher(storedTeacher);
   }, [navigate]);
 
-  
- const handleLogout = () => {
-    localStorage.removeItem("teacher"); // or "user", depending on your auth
+  const teacherUserId = teacher?.userId;
+
+
+  useEffect(() => {
+  if (!selectedCourseId) return;
+
+  const loadCourseData = async () => {
+    try {
+      // Get all student marks for this course
+      const marksRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}.json`
+      );
+
+      const course = courses.find((c) => c.id === selectedCourseId);
+      if (!course) return;
+
+      // Filter students for this course
+      const filteredStudents = students.filter(
+        (s) => s.grade === course.grade && s.section === course.section
+      );
+
+      if (marksRes.data) {
+        // Existing marks exist
+        const initMarks = {};
+        let assessmentListFromDB = [];
+
+        filteredStudents.forEach((s) => {
+          if (marksRes.data[s.id]?.assessments) {
+            initMarks[s.id] = marksRes.data[s.id].assessments;
+
+            // Get structure from first student (all should have same structure)
+            if (!assessmentListFromDB.length) {
+              assessmentListFromDB = Object.values(initMarks[s.id]);
+            }
+          } else {
+            // No marks for this student yet, initialize
+            initMarks[s.id] = {};
+          }
+        });
+
+        setStudentMarks(initMarks);
+        setAssessmentList(
+          assessmentListFromDB.map((a, idx) => ({ name: a.name, max: a.max }))
+        );
+        setStructureSubmitted(true);
+      } else {
+        // No marks exist, allow structure creation
+        setStructureSubmitted(false);
+        setStudentMarks({});
+      }
+    } catch (err) {
+      console.error("Error loading marks:", err);
+      setStructureSubmitted(false);
+      setStudentMarks({});
+    }
+  };
+
+  loadCourseData();
+}, [selectedCourseId, courses, students]);
+
+
+
+  // ---------------- FETCH COURSES ----------------
+  useEffect(() => {
+    if (!teacher) return;
+
+    const fetchCourses = async () => {
+      try {
+        const [assignmentsRes, coursesRes, teachersRes] = await Promise.all([
+          axios.get(
+            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherAssignments.json"
+          ),
+          axios.get(
+            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Courses.json"
+          ),
+          axios.get(
+            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+          ),
+        ]);
+
+        const teacherEntry = Object.entries(teachersRes.data || {}).find(
+          ([_, t]) => t.userId === teacherUserId
+        );
+        if (!teacherEntry) return;
+        const teacherKey = teacherEntry[0];
+
+        const assignedCourses = Object.values(assignmentsRes.data || {})
+          .filter((a) => a.teacherId === teacherKey)
+          .map((a) => a.courseId);
+
+        const teacherCourses = Object.entries(coursesRes.data || {})
+          .filter(([courseKey]) => assignedCourses.includes(courseKey))
+          .map(([courseKey, course]) => ({ id: courseKey, ...course }));
+
+        setCourses(teacherCourses);
+      } catch (err) {
+        console.error("Error fetching courses:", err);
+      }
+    };
+
+    fetchCourses();
+  }, [teacher, teacherUserId]);
+
+  // ---------------- FETCH STUDENTS ----------------
+  useEffect(() => {
+    if (!teacherUserId) return;
+
+    const fetchStudents = async () => {
+      try {
+        const [studentsRes, usersRes] = await Promise.all([
+          axios.get(
+            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+          ),
+          axios.get(
+            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+          ),
+        ]);
+
+        const studentsData = studentsRes.data || {};
+        const usersData = usersRes.data || {};
+
+        const mappedStudents = Object.entries(studentsData).map(([id, s]) => ({
+          id,
+          ...s,
+          name: usersData?.[s.userId]?.name || "Unknown",
+          profileImage: usersData?.[s.userId]?.profileImage || "/default-profile.png",
+        }));
+
+        setStudents(mappedStudents);
+      } catch (err) {
+        console.error("Error fetching students:", err);
+        setStudents([]);
+      }
+    };
+
+    fetchStudents();
+  }, [teacherUserId]);
+
+  // ---------------- RESET ASSESSMENTS ON COURSE CHANGE ----------------
+  useEffect(() => {
+    if (!selectedCourseId) return;
+    setAssessmentList([]);
+    setStructureSubmitted(false);
+    setStudentMarks({});
+  }, [selectedCourseId]);
+
+  // ---------------- ASSESSMENT FUNCTIONS ----------------
+  const addAssessment = () => setAssessmentList((p) => [...p, { name: "", max: "" }]);
+  const updateAssessment = (i, field, value) => {
+    const copy = [...assessmentList];
+    copy[i][field] = value;
+    setAssessmentList(copy);
+  };
+  const removeAssessment = (i) =>
+    setAssessmentList((p) => p.filter((_, idx) => idx !== i));
+
+  // ---------------- SUBMIT STRUCTURE ----------------
+  const submitStructure = async () => {
+  if (assessmentList.reduce((sum, a) => sum + Number(a.max || 0), 0) !== 100) {
+    alert("Total MAX must be exactly 100");
+    return;
+  }
+
+  const structureObj = {};
+  assessmentList.forEach((a, idx) => {
+    structureObj[`a${idx + 1}`] = { name: a.name, max: Number(a.max) };
+  });
+
+  try {
+    // No more deleting assessmentStructure node
+
+    // Filter students for this course
+    const course = courses.find((c) => c.id === selectedCourseId);
+    if (!course) return;
+    const filteredStudents = students.filter(
+      (s) => s.grade === course.grade && s.section === course.section
+    );
+
+    // Initialize marks for each student directly under their student node
+    const marksInit = {};
+    filteredStudents.forEach((s) => {
+      marksInit[s.id] = {};
+      Object.entries(structureObj).forEach(([k, a]) => {
+        marksInit[s.id][k] = { ...a, score: 0 };
+      });
+    });
+
+    // Save student marks to DB directly
+    await Promise.all(
+      filteredStudents.map((s) =>
+        axios.put(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}/${s.id}.json`,
+          { teacherName: teacher.name, assessments: marksInit[s.id] }
+        )
+      )
+    );
+
+    setStudentMarks(marksInit);
+    setStructureSubmitted(true);
+    alert("Student marks initialized successfully!");
+  } catch (err) {
+    console.error("Error submitting structure:", err);
+    alert("Failed to submit structure.");
+  }
+};
+
+
+  const updateScore = (sid, key, value) => {
+    setStudentMarks((p) => ({
+      ...p,
+      [sid]: { ...p[sid], [key]: { ...p[sid][key], score: Number(value) } },
+    }));
+  };
+
+  const saveMarks = async (sid) => {
+    await axios.put(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}/${sid}.json`,
+      { teacherName: teacher.name, assessments: studentMarks[sid] }
+    );
+    alert("Marks saved");
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("teacher");
     navigate("/login");
   };
 
-  // ---------------- FETCH STUDENTS AND COURSES ----------------
-  useEffect(() => {
-  if (!teacherInfo) return; // wait until teacher info is loaded
-
-  async function fetchData() {
-    try {
-      const [
-        studentsData,
-        usersData,
-        coursesData,
-        teacherAssignmentsData,
-        teachersData,
-      ] = await Promise.all([
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Courses.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherAssignments.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"),
-      ]);
-
-      // Find teacher key
-      const teacherEntry = Object.entries(teachersData.data || {}).find(
-        ([_, t]) => t.userId === teacherInfo.userId
-      );
-      if (!teacherEntry) return;
-      const teacherKey = teacherEntry[0];
-
-      // Get courses assigned to this teacher
-      const assignedCourseIds = Object.values(teacherAssignmentsData.data || {})
-        .filter((a) => a.teacherId === teacherKey)
-        .map((a) => a.courseId);
-
-      const teacherCourses = assignedCourseIds.map((id) => ({
-        id,
-        ...coursesData.data[id],
-      }));
-      setCourses(teacherCourses);
-
-      // Map students to include name and profile image from Users node
-     const filteredStudents = Object.entries(studentsData.data || {}).map(
-  ([studentId, student]) => {
-    const user = usersData.data?.[student.userId]; // <- maybe userId instead of use
-    return {
-      ...student,
-      id: studentId,
-      name: user?.name || "Unknown",
-      username: user?.username || "Unknown",
-      profileImage: user?.profileImage || "/default-profile.png",
-    };
-  }
-);
-
-
-      setStudents(filteredStudents);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    }
-  }
-
-  fetchData();
-}, [teacherInfo]);
-
-
-
-  useEffect(() => {
-  if (!selectedStudent) return;
-
-  async function fetchMarks() {
-    try {
-      const [resMarks, resAssignments, resTeachers, resUsers] = await Promise.all([
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherAssignments.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"),
-      ]);
-
-      const marksData = resMarks.data || {};
-      const assignments = resAssignments.data || {};
-      const teachers = resTeachers.data || {};
-      const users = resUsers.data || {};
-
-      const marks = {};
-Object.entries(marksData).forEach(([courseId, studentsInCourse]) => {
-  Object.entries(studentsInCourse).forEach(([studentKey, mark]) => {
-    if (studentKey !== selectedStudent.id) return; // ✅ compare with studentId
-    marks[courseId] = {
-      mark20: mark.mark20 || 0,
-      mark30: mark.mark30 || 0,
-      mark50: mark.mark50 || 0,
-      teacherName: mark.teacherName || "Unknown",
-    };
-  });
-});
-
-
-
-      setStudentMarks(marks);
-    } catch (err) {
-      console.error("Error fetching marks:", err);
-      setStudentMarks({});
-    }
-  }
-
-  fetchMarks();
-}, [selectedStudent]);
-
-  // ---------------- FETCH EXISTING MARKS ----------------
-  useEffect(() => {
-    if (!selectedCourseId) return;
-
-    async function fetchMarks() {
-      try {
-        const res = await axios.get(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}.json`
-        );
-        setMarks(res.data || {});
-      } catch (err) {
-        console.error(err);
-        setMarks({});
-      }
-    }
-
-    fetchMarks();
-  }, [selectedCourseId]);
-
-  // ---------------- HANDLE MARK CHANGE ----------------
-  const handleMarkChange = (studentId, field, value) => {
-  setMarks((prev) => {
-    const updated = { ...prev[studentId], [field]: Number(value) };
-    const total = (updated.mark20 || 0) + (updated.mark30 || 0) + (updated.mark50 || 0);
-    const grade = calculateGrade(total);
-    return { ...prev, [studentId]: { ...updated, total, grade } };
-  });
-};
-
-  // ---------------- SUBMIT MARKS ----------------
-  const submitMarks = async (student) => {
-    const data = marks[student.id];
-    if (!data) {
-      alert("Please enter marks first");
-      return;
-    }
-    try {
-      await axios.put(
-  `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}/${student.id}.json`,
-  { ...data, teacherName: teacherInfo.name }
-);
-
-     
-      alert(`Marks saved for ${student.name}`);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save marks");
-    }
-  };
-
-  const filteredStudentsByCourse = students.filter((s) => {
-    const course = courses.find((c) => c.id === selectedCourseId);
-    if (!course) return false;
-    return s.grade === course.grade && s.section === course.section;
-  });
-
-  if (!teacherInfo) return null;
-
+  // ---------------- UI ----------------
   return (
-   
-<div className="dashboard-page">
-                  {/* Top Navbar */}
-                  <nav className="top-navbar">
-                    <h2>Gojo Dashboard</h2>
-                    <div className="nav-search">
-                      <FaSearch className="search-icon" />
-                      <input type="text" placeholder="Search Teacher and Student..." />
-                    </div>
-                    <div className="nav-right">
-                      <div className="icon-circle"><FaBell /></div>
-                      <div className="icon-circle"><FaFacebookMessenger /></div>
-                      <div className="icon-circle"><FaCog /></div>
-                      
-        
-              <img src={teacher?.profileImage || "/default-profile.png"} />
-        
-                    </div>
-                  </nav>
-            
-                  <div className="google-dashboard">
-                    {/* Sidebar */}
-                    <div className="google-sidebar">
-                  {teacher && (
-          <div className="sidebar-profile">
-            <div className="sidebar-img-circle">
-              <img src={teacher.profileImage || "/default-profile.png"} alt="profile" />
-            </div>
-            <h3>{teacher.name}</h3>
-            <p>{teacher.username}</p>
+    <div className="dashboard-page">
+      {/* Top Navbar */}
+      <nav className="top-navbar">
+        <h2>Gojo Dashboard</h2>
+        <div className="nav-search">
+          <FaSearch className="search-icon" />
+          <input type="text" placeholder="Search Teacher and Student..." />
+        </div>
+        <div className="nav-right">
+          <div className="icon-circle">
+            <FaBell />
           </div>
-        )}
-        
-                      <div className="sidebar-menu">
-                        <Link
-                          className="sidebar-btn"
-                          to="/dashboard"
-                      
-                        >
-                          <FaHome /> Home
-                        </Link>
-                        <Link className="sidebar-btn" to="/notes">
-                          <FaClipboardCheck /> Notes
-                        </Link>
-                        <Link className="sidebar-btn" to="/students">
-                          <FaUsers /> Students
-                        </Link>
-                        <Link className="sidebar-btn" to="/admins"  >
-                          <FaUsers /> Admins
-                        </Link>
-                        <Link
-                          className="sidebar-btn"
-                          to="/parents" 
-                          
-                        >
-                          <FaChalkboardTeacher /> Parents
-                        </Link>
-                        <Link className="sidebar-btn" to="/marks" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}>
-                          <FaClipboardCheck /> Marks
-                        </Link>
-                        <Link className="sidebar-btn" to="/attendance">
-                          <FaUsers /> Attendance
-                        </Link>
-                        <Link className="sidebar-btn" to="/settings">
-                          <FaCog /> Settings
-                        </Link>
-                        <button className="sidebar-btn logout-btn" onClick={handleLogout}>
-                          <FaSignOutAlt /> Logout
-                        </button>
-                      </div>
-                    </div>
-      {/* MAIN CONTENT */}
-      <div style={{ marginLeft: "300px", marginRight: "250px", paddingTop: "80px", display: "flex", justifyContent: "center", width: "100%" }}>
-        <div style={{ width: "900px" }}>
-          {/* COURSE SELECT */}
-          <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} style={{ padding: "10px", borderRadius: "10px", marginBottom: "20px", border: "1px solid #ddd", width: "100%" }}>
-            <option value="">Select Course</option>
-            {courses.map(c => <option key={c.id} value={c.id}>{c.subject} — Grade {c.grade}{c.section}</option>)}
-          </select>
+          <div className="icon-circle">
+            <FaFacebookMessenger />
+          </div>
+          <div className="icon-circle">
+            <FaCog />
+          </div>
+          <img src={teacher?.profileImage || "/default-profile.png"} alt="profile" />
+        </div>
+      </nav>
 
-          {/* MARKS TABLE */}
-          <div style={{ background: "#fff", borderRadius: "16px", padding: "25px", boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
-            <h3 style={{ marginBottom: "20px" }}>Student Marks</h3>
-            <table width="100%" style={{ borderCollapse: "collapse", textAlign: "center" }}>
-              <thead>
-                <tr style={{ background: "#f4f6ff" }}>
-                  <th style={thStyle}>Student</th>
-                  <th style={thStyle}>20%</th>
-                  <th style={thStyle}>30%</th>
-                  <th style={thStyle}>50%</th>
-                  <th style={thStyle}>Total</th>
-                  <th style={thStyle}>Grade</th>
-                  <th style={thStyle}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStudentsByCourse.map(s => {
-                  const grade = marks[s.userId]?.grade;
-                  const gradeColor = grade === "A" || grade === "B" ? "#22c55e" : grade === "C" ? "#facc15" : grade ? "#ef4444" : "#999";
-                  return (
-                    <tr key={s.userId} style={{ borderBottom: "1px solid #eee", cursor: "pointer" }} onClick={() => setSelectedStudent(s)}>
-                  <td style={{ ...tdStyle, display: "flex", alignItems: "center", gap: "10px" }}>
-  <div
-    style={{
-      width: "35px",
-      height: "35px",
-      borderRadius: "50%",
-      border: "2px solid #e61d03", // red border
-      overflow: "hidden"
-    }}
-  >
-    <img
-      src={s.profileImage || "/default-profile.png"}
-      alt={s.name}
-      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-    />
-  </div>
-  <span>{s.name}</span>
-</td>
+      <div className="google-dashboard">
+        {/* Sidebar */}
+        <div className="google-sidebar">
+          {teacher && (
+            <div className="sidebar-profile">
+              <div className="sidebar-img-circle">
+                <img src={teacher.profileImage || "/default-profile.png"} alt="profile" />
+              </div>
+              <h3>{teacher.name}</h3>
+              <p>{teacher.username}</p>
+            </div>
+          )}
 
-
-                      <td style={tdStyle}><input type="number" min="0" max="20" value={marks[s.id]?.mark20 || ""} onChange={e => handleMarkChange(s.id, "mark20", e.target.value)} style={inputStyle} /></td>
-                      <td style={tdStyle}><input type="number" min="0" max="30" value={marks[s.id]?.mark30 || ""} onChange={e => handleMarkChange(s.id, "mark30", e.target.value)} style={inputStyle} /></td>
-                      <td style={tdStyle}><input type="number" min="0" max="50" value={marks[s.id]?.mark50 || ""} onChange={e => handleMarkChange(s.id, "mark50", e.target.value)} style={inputStyle} /></td>
-                      <td style={{ ...tdStyle, fontWeight: "bold" }}>{marks[s.id]?.total || 0}</td>
-                      <td style={{ ...tdStyle, fontWeight: "bold", color: gradeColor }}>{grade || "-"}</td>
-                      <td style={tdStyle}><button onClick={() => submitMarks(s)} style={submitBtnStyle}><FaSave /> Submit</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="sidebar-menu">
+            <Link className="sidebar-btn" to="/dashboard">
+              <FaHome /> Home
+            </Link>
+            <Link className="sidebar-btn" to="/notes">
+              <FaClipboardCheck /> Notes
+            </Link>
+            <Link className="sidebar-btn" to="/students">
+              <FaUsers /> Students
+            </Link>
+            <Link className="sidebar-btn" to="/admins">
+              <FaUsers /> Admins
+            </Link>
+            <Link className="sidebar-btn" to="/parents">
+              <FaChalkboardTeacher /> Parents
+            </Link>
+            <Link
+              className="sidebar-btn"
+              to="/marks"
+              style={{ backgroundColor: "#4b6cb7", color: "#fff" }}
+            >
+              <FaClipboardCheck /> Marks
+            </Link>
+            <Link className="sidebar-btn" to="/attendance">
+              <FaUsers /> Attendance
+            </Link>
+            <Link className="sidebar-btn" to="/schedule" >
+                                             <FaUsers /> Schedule
+                                           </Link>
+            <Link className="sidebar-btn" to="/settings">
+              <FaCog /> Settings
+            </Link>
+            <button className="sidebar-btn logout-btn" onClick={handleLogout}>
+              <FaSignOutAlt /> Logout
+            </button>
           </div>
         </div>
-      </div>
 
-      {/* RIGHT SIDEBAR */}
-      {/* RIGHT SIDEBAR */}
-{/* RIGHT SIDEBAR */}
-{/* RIGHT SIDEBAR */}
+{/* MAIN CONTENT */}
 <div
   style={{
-    width: "450px",
-    position: "fixed",
-    right: 0,
-    top: 60,
-    bottom: 0,
-    background: "#fff",
-    borderLeft: "1px solid #eee",
-    padding: "20px",
-    overflowY: "auto",
+    flex: 1,
+    display: "flex",
+    justifyContent: "center",
+    padding: "40px",
+    marginLeft: "150px",
+    
+    background: "#eef2f7",
+    minHeight: "100vh",
+    fontFamily: "'Inter', sans-serif",
   }}
 >
-  <h3 style={{ marginBottom: "15px", fontSize: "18px", fontWeight: "600", color: "#333" }}>Student Info</h3>
-  
-  {selectedStudent ? (
-    <>
-      {/* PROFILE CARD */}
-      <div
+  <div style={{ width: "55%" }}>
+    {/* Page Title */}
+    <h2
+      style={{
+        textAlign: "center",
+        marginBottom: "35px",
+        color: "#1e3a8a",
+        fontSize: "36px",
+        fontWeight: "700",
+        letterSpacing: "1px",
+      }}
+    >
+      Marks Entry Dashboard
+    </h2>
+
+    {/* Course Selection */}
+    <div
+      style={{
+        marginBottom: "30px",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: "15px",
+      }}
+    >
+      <label
         style={{
-          background: "#f9fafb",
-          borderRadius: "15px",
-          padding: "20px",
-          boxShadow: "0 8px 20px rgba(0,0,0,0.05)",
-          textAlign: "center",
-          marginBottom: "20px",
+          fontWeight: "600",
+          color: "#374151",
+          fontSize: "16px",
         }}
       >
-        <div
-          style={{
-            width: "100px",
-            height: "100px",
-            margin: "0 auto 15px",
-            borderRadius: "50%",
-            overflow: "hidden",
-            border: "3px solid #4b6cb7",
-          }}
-        >
-          <img
-            src={selectedStudent.profileImage || "/default-profile.png"}
-            alt={selectedStudent.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        </div>
+        Select Course:
+      </label>
+      <select
+        value={selectedCourseId}
+        onChange={(e) => setSelectedCourseId(e.target.value)}
+        style={{
+          padding: "12px 18px",
+          borderRadius: "12px",
+          border: "1px solid #cbd5e1",
+          background: "#fff",
+          minWidth: "300px",
+          fontSize: "15px",
+          fontWeight: "500",
+          boxShadow: "0 6px 15px rgba(0,0,0,0.08)",
+          transition: "0.3s all",
+        }}
+      >
+        <option value="">-- Select Course --</option>
+        {courses.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.subject} - Grade {c.grade} Section {c.section}
+          </option>
+        ))}
+      </select>
+    </div>
 
-        <h4 style={{ margin: "5px 0", fontSize: "16px", fontWeight: "600", color: "#111" }}>
-          {selectedStudent.name}
-        </h4>
-        <p style={{ margin: "3px 0", fontSize: "14px", color: "#555" }}>
-          <strong>Username:</strong> {selectedStudent.username}
-        </p>
-        <p style={{ margin: "3px 0", fontSize: "14px", color: "#555" }}>
-          <strong>Grade:</strong> {selectedStudent.grade}
-        </p>
-        <p style={{ margin: "3px 0", fontSize: "14px", color: "#555" }}>
-          <strong>Section:</strong> {selectedStudent.section}
-        </p>
-        {selectedStudent.age && (
-          <p style={{ margin: "3px 0", fontSize: "14px", color: "#555" }}>
-            <strong>Age:</strong> {selectedStudent.age}
-          </p>
-        )}
-        {selectedStudent.parent && (
-          <p style={{ margin: "3px 0", fontSize: "14px", color: "#555" }}>
-            <strong>Parent:</strong> {selectedStudent.parent}
-          </p>
-        )}
-      </div>
+    {/* Edit Structure */}
+    {structureSubmitted && (
+      <button
+        style={{
+          marginBottom: "30px",
+          padding: "10px 18px",
+          background: "linear-gradient(135deg, #f59e0b, #d97706)",
+          color: "#fff",
+          borderRadius: "12px",
+          border: "none",
+          fontWeight: "600",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+          transition: "0.3s all",
+        }}
+        onClick={() => {
+          setStructureSubmitted(false);
+          setStudentMarks({});
+        }}
+      >
+        <FaEdit /> Edit Assessment Structure
+      </button>
+    )}
 
-
-        {/* PERFORMANCE TAB */}
-      {studentTab === "performance" && (
-        <div
-          style={{
-            position: "relative",
-            paddingBottom: "70px",
-            background: "#f8fafc",
-          }}
-        >
+    {/* Assessment Builder */}
+    {selectedCourseId && !structureSubmitted && (
+      <div
+        style={{
+          backdropFilter: "blur(15px)",
+          background: "rgba(255, 255, 255, 0.85)",
+          padding: "30px",
+          borderRadius: "20px",
+          boxShadow: "0 15px 30px rgba(0,0,0,0.08)",
+          marginBottom: "40px",
+          transition: "all 0.3s ease",
+        }}
+      >
+        <h3 style={{ marginBottom: "25px", color: "#1f2937", fontWeight: "600", fontSize: "20px" }}>
+          Assessment Structure
+        </h3>
+        {assessmentList.map((a, i) => (
           <div
+            key={i}
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "20px",
-              padding: "20px",
+              display: "flex",
+              gap: "12px",
+              marginBottom: "18px",
+              alignItems: "center",
             }}
           >
-            {Object.keys(studentMarks).length === 0 ? (
-              <>
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "30px",
-                    borderRadius: "18px",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                  }}
-                >
-                  🚫 No Performance Records
-                </div>
+            <input
+              placeholder="Assessment Name"
+              value={a.name}
+              onChange={(e) => updateAssessment(i, "name", e.target.value)}
+              style={{
+                flex: 2,
+                padding: "12px 14px",
+                borderRadius: "12px",
+                border: "1px solid #d1d5db",
+                outline: "none",
+                boxShadow: "inset 0 3px 6px rgba(0,0,0,0.06)",
+                fontWeight: "500",
+              }}
+            />
+            <input
+              type="number"
+              placeholder="Max"
+              value={a.max}
+              onChange={(e) => updateAssessment(i, "max", e.target.value)}
+              style={{
+                flex: 1,
+                padding: "12px 14px",
+                borderRadius: "12px",
+                border: "1px solid #d1d5db",
+                outline: "none",
+                boxShadow: "inset 0 3px 6px rgba(0,0,0,0.06)",
+                fontWeight: "500",
+              }}
+            />
+            <button
+              onClick={() => removeAssessment(i)}
+              style={{
+                background: "#ef4444",
+                color: "#fff",
+                padding: "12px 14px",
+                borderRadius: "12px",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 6px 15px rgba(0,0,0,0.12)",
+                transition: "0.3s all",
+              }}
+            >
+              <FaTrash />
+            </button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: "20px", alignItems: "center", marginTop: "20px" }}>
+          <button
+            style={{
+              padding: "12px 20px",
+              borderRadius: "14px",
+              background: "#10b981",
+              color: "#fff",
+              border: "none",
+              cursor: "pointer",
+              fontWeight: "600",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+              transition: "0.3s all",
+            }}
+            onClick={addAssessment}
+          >
+            <FaPlus /> Add Assessment
+          </button>
+          <span style={{ fontWeight: "600", color: "#374151", fontSize: "16px" }}>
+            Total Max: {assessmentList.reduce((sum, a) => sum + Number(a.max || 0), 0)} / 100
+          </span>
+        </div>
+        <button
+          style={{
+            marginTop: "30px",
+            padding: "14px 20px",
+            borderRadius: "16px",
+            background: "linear-gradient(135deg, #4b6cb7, #1e40af)",
+            color: "#fff",
+            border: "none",
+            fontWeight: "600",
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+            transition: "0.3s all",
+            fontSize: "16px",
+          }}
+          onClick={submitStructure}
+        >
+          Submit Structure
+        </button>
+      </div>
+    )}
 
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "30px",
-                    borderRadius: "18px",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                  }}
-                >
-                  🚫 No Performance Records
-                </div>
-              </>
-            ) : (
-              Object.entries(studentMarks).map(([courseId, marks], idx) => {
-                const total =
-                  (marks.mark20 || 0) + (marks.mark30 || 0) + (marks.mark50 || 0);
-                const percentage = Math.min(total, 100);
-                const statusColor =
-                  percentage >= 75
-                    ? "#16a34a"
-                    : percentage >= 50
-                    ? "#f59e0b"
-                    : "#dc2626";
+    {/* Student Marks Table */}
+    {structureSubmitted && (
+      <div
+        style={{
+          overflowX: "auto",
+          backdropFilter: "blur(12px)",
+          background: "rgba(255,255,255,0.9)",
+          padding: "30px",
+          borderRadius: "20px",
+          boxShadow: "0 15px 30px rgba(0,0,0,0.12)",
+          transition: "0.3s all",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "separate",
+            borderSpacing: "0 12px",
+            fontSize: "15px",
+          }}
+        >
+         <thead>
+  <tr
+    style={{
+      background: "linear-gradient(135deg, #4b6cb7, #1e3a8a)",
+      color: "#fff",
+      borderRadius: "16px",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+      textTransform: "uppercase",
+      letterSpacing: "1px",
+      fontWeight: "600",
+      fontSize: "14px",
+    }}
+  >
+    <th
+      style={{
+        padding: "16px 20px",
+        textAlign: "left",
+        borderRadius: "16px 0 0 16px",
+        background: "rgba(255,255,255,0.1)",
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <FaUsers /> Student
+      </span>
+    </th>
 
-                return (
-                  <div
-                    key={idx}
+    {assessmentList.map((a, i) => (
+      <th
+        key={i}
+        style={{
+          padding: "16px 18px",
+          background: "rgba(255,255,255,0.05)",
+          textAlign: "center",
+          transition: "0.3s all",
+        }}
+      >
+        {a.name} ({a.max})
+      </th>
+    ))}
+
+    <th
+      style={{
+        padding: "16px 18px",
+        background: "rgba(255,255,255,0.05)",
+        textAlign: "center",
+      }}
+    >
+      Total
+    </th>
+
+    <th
+      style={{
+        padding: "16px 18px",
+        background: "rgba(255,255,255,0.05)",
+        textAlign: "center",
+      }}
+    >
+      Grade
+    </th>
+
+    <th
+      style={{
+        padding: "16px 20px",
+        borderRadius: "0 16px 16px 0",
+        background: "rgba(255,255,255,0.1)",
+        textAlign: "center",
+      }}
+    >
+      <FaSave /> Save
+    </th>
+  </tr>
+</thead>
+
+          <tbody>
+            {Object.entries(studentMarks).map(([sid, marks]) => {
+              const total = Object.values(marks).reduce((s, a) => s + (a.score || 0), 0);
+              const grade =
+                total >= 90
+                  ? "A"
+                  : total >= 80
+                  ? "B"
+                  : total >= 70
+                  ? "C"
+                  : total >= 60
+                  ? "D"
+                  : "F";
+              const student = students.find((s) => s.id === sid);
+              const gradeColor =
+                grade === "A"
+                  ? "#16a34a"
+                  : grade === "B"
+                  ? "#2563eb"
+                  : grade === "C"
+                  ? "#f59e0b"
+                  : grade === "D"
+                  ? "#f97316"
+                  : "#ef4444";
+              return (
+                <tr
+                  key={sid}
+                  style={{
+                    background: "#f9fafb",
+                    borderRadius: "12px",
+                    marginBottom: "10px",
+                    transition: "0.3s all",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#e0e7ff")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                >
+                  <td
                     style={{
-                      padding: "18px",
-                      borderRadius: "20px",
-                      background: "#ffffff",
-                      boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
-                      color: "#0f172a",
-                      transition: "all 0.3s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "translateY(-6px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = "translateY(0)";
+                      padding: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      fontWeight: "600",
                     }}
                   >
-                    {/* Course Name */}
                     <div
                       style={{
-                        fontSize: "16px",
-                        fontWeight: "800",
-                        marginBottom: "14px",
-                        textTransform: "capitalize",
-                        color: "#2563eb",
+                        width: "45px",
+                        height: "45px",
+                        borderRadius: "50%",
+                        overflow: "hidden",
+                        border: "2px solid #4b6cb7",
                       }}
                     >
-                      {courseId.replace("course_", "").replace(/_/g, " ")}
+                      <img
+                        src={student?.profileImage || "/default-profile.png"}
+                        alt={student?.name}
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
                     </div>
-
-                    {/* Score Circle */}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "center",
-                        marginBottom: "16px",
-                      }}
-                    >
-                      <div
+                    {student?.name}
+                  </td>
+                  {Object.entries(marks).map(([k, a]) => (
+                    <td key={k} style={{ padding: "12px" }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max={a.max}
+                        value={a.score}
+                        onChange={(e) => updateScore(sid, k, e.target.value)}
                         style={{
-                          width: "90px",
-                          height: "90px",
-                          borderRadius: "50%",
-                          background: `conic-gradient(
-                          ${statusColor} ${percentage * 3.6}deg,
-                          #e5e7eb 0deg
-                        )`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
+                          width: "70px",
+                          padding: "8px 12px",
+                          borderRadius: "10px",
+                          border: "1px solid #cbd5e1",
+                          textAlign: "center",
+                          boxShadow: "inset 0 3px 6px rgba(0,0,0,0.06)",
+                          transition: "0.3s all",
+                          fontWeight: "500",
                         }}
-                      >
-                        <div
-                          style={{
-                            width: "66px",
-                            height: "66px",
-                            borderRadius: "50%",
-                            background: "#ffffff",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "18px",
-                              fontWeight: "800",
-                              color: statusColor,
-                            }}
-                          >
-                            {total}
-                          </div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>
-                            / 100
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Marks Bars */}
-                    {[
-                      { key: "mark20", label: "Quiz", max: 20, color: "#2563eb" },
-                      { key: "mark30", label: "Test", max: 30, color: "#16a34a" },
-                      { key: "mark50", label: "Final", max: 50, color: "#ea580c" },
-                    ].map(({ key, label, max, color }) => (
-                      <div key={key} style={{ marginBottom: "10px" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            color: "#334155",
-                          }}
-                        >
-                          <span>{label}</span>
-                          <span>
-                            {marks[key]} / {max}
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            height: "6px",
-                            borderRadius: "999px",
-                            background: "#e5e7eb",
-                            marginTop: "5px",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${(marks[key] / max) * 100}%`,
-                              height: "100%",
-                              background: color,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Status */}
-                    <div
+                      />
+                    </td>
+                  ))}
+                  <td style={{ padding: "12px", fontWeight: "600" }}>{total}</td>
+                  <td style={{ padding: "12px", fontWeight: "700", color: gradeColor }}>{grade}</td>
+                  <td style={{ padding: "12px" }}>
+                    <button
                       style={{
-                        marginTop: "12px",
-                        textAlign: "center",
-                        fontSize: "13px",
-                        fontWeight: "700",
-                        color: statusColor,
+                        padding: "8px 14px",
+                        borderRadius: "12px",
+                        background: "#2563eb",
+                        color: "#fff",
+                        border: "none",
+                        cursor: "pointer",
+                        transition: "0.3s all",
                       }}
+                      onClick={() => saveMarks(sid)}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#1e40af")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#2563eb")}
                     >
-                      {percentage >= 75
-                        ? "Excellent"
-                        : percentage >= 50
-                        ? "Good"
-                        : "Needs Improvement"}
-                    </div>
-
-                    {/* Teacher */}
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        textAlign: "center",
-                        fontSize: "12px",
-                        color: "#64748b",
-                      }}
-                    >
-                      👨‍🏫 {marks.teacherName}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Fixed Message Button */}
-   
-
-
-        </div>
-      )}
-    </>
-  ) : (
-    <p style={{ color: "#888", textAlign: "center", marginTop: "50px" }}>
-      Select a student to see info
-    </p>
-  )}
+                      <FaSave />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
 </div>
 
 
-    </div>
+
+      </div>
     </div>
   );
 }
-
-/* ---------------- STYLES ---------------- */
-const thStyle = { padding: "14px", fontSize: "14px", fontWeight: "600", color: "#555" };
-const tdStyle = { padding: "12px", fontSize: "14px" };
-const inputStyle = { width: "70px", padding: "6px", borderRadius: "8px", border: "1px solid #ddd", textAlign: "center", outline: "none" };
-const submitBtnStyle = { background: "#4b6cb7", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" };
-
-export default MarksPage;

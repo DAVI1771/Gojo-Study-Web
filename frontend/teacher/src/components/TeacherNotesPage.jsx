@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState,useRef } from "react";
 import axios from "axios";
 import { FaHome, FaFileAlt, FaUpload, FaCog, FaSignOutAlt, FaSearch, FaBell, FaUsers, FaClipboardCheck, FaChalkboardTeacher, FaFacebookMessenger } from "react-icons/fa";
 import { Link, useNavigate } from "react-router-dom";
 import "../styles/global.css";
+
+const API_BASE = "http://127.0.0.1:5000/api";
+
+
 
 function TeacherNotesPage() {
   const [teacher, setTeacher] = useState(null); // single state for teacher
@@ -13,6 +17,12 @@ function TeacherNotesPage() {
   const [posts, setPosts] = useState([]);
   const navigate = useNavigate();
 
+const [notifications, setNotifications] = useState([]);
+const [showNotifications, setShowNotifications] = useState(false);
+const [highlightedPostId, setHighlightedPostId] = useState(null);
+
+// Refs for posts (for scrolling/highlighting)
+const postRefs = useRef({});
   const teacherUserId = teacher?.userId; // safe access
 
   // ---------------- Load Logged-In Teacher ----------------
@@ -24,6 +34,53 @@ function TeacherNotesPage() {
     }
     setTeacher(storedTeacher);
   }, []);
+
+// Fetch notifications from posts
+useEffect(() => {
+  const fetchNotifications = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/get_posts`);
+      const postsData = res.data || [];
+
+      // Use last 5 posts as notifications
+      const latestNotifications = postsData.slice(0, 5).map((post) => ({
+        id: post.postId,
+        title: post.message?.substring(0, 50) || "Untitled post",
+        adminName: post.adminName || "Admin",
+        adminProfile: post.adminProfile || "/default-profile.png",
+      }));
+
+      setNotifications(latestNotifications);
+    } catch (err) {
+      console.error("Error fetching notifications:", err);
+    }
+  };
+
+  fetchNotifications();
+}, []);
+
+// Handle notification click
+const handleNotificationClick = (postId, index) => {
+  setHighlightedPostId(postId);
+
+  // Scroll the post into view
+  const postElement = postRefs.current[postId];
+  if (postElement) {
+    postElement.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Remove clicked notification
+  const updatedNotifications = [...notifications];
+  updatedNotifications.splice(index, 1);
+  setNotifications(updatedNotifications);
+
+  // Close popup
+  setShowNotifications(false);
+
+  // Remove highlight after 3 seconds
+  setTimeout(() => setHighlightedPostId(null), 3000);
+};
+
 
   // ---------------- Fetch Courses ----------------
   useEffect(() => {
@@ -131,7 +188,92 @@ function TeacherNotesPage() {
           <input type="text" placeholder="Search Teacher and Student..." />
         </div>
         <div className="nav-right">
-          <div className="icon-circle"><FaBell /></div>
+    
+<div className="icon-circle">
+  <div
+    onClick={() => setShowNotifications(!showNotifications)}
+    style={{ cursor: "pointer", position: "relative" }}
+  >
+    <FaBell size={24} />
+    {notifications.length > 0 && (
+      <span
+        style={{
+          position: "absolute",
+          top: -5,
+          right: -5,
+          background: "red",
+          color: "white",
+          borderRadius: "50%",
+          width: 18,
+          height: 18,
+          fontSize: 12,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {notifications.length}
+      </span>
+    )}
+  </div>
+
+  {showNotifications && (
+    <div
+      style={{
+        position: "absolute",
+        top: 30,
+        right: 0,
+        width: 300,
+        maxHeight: 400,
+        overflowY: "auto",
+        background: "#fff",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+        borderRadius: 8,
+        zIndex: 100,
+      }}
+    >
+      {notifications.length > 0 ? (
+        notifications.map((post, index) => (
+          <div
+            key={post.id || index}
+            onClick={() => {
+              // Navigate to dashboard first
+              navigate("/dashboard");
+
+              // Highlight and scroll the post after a small delay to allow navigation
+              setTimeout(() => handleNotificationClick(post.id, index), 100);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "10px 15px",
+              borderBottom: "1px solid #eee",
+              cursor: "pointer",
+            }}
+          >
+            <img
+              src={post.adminProfile}
+              alt={post.adminName}
+              style={{
+                width: 35,
+                height: 35,
+                borderRadius: "50%",
+                marginRight: 10,
+              }}
+            />
+            <div>
+              <strong>{post.adminName}</strong>
+              <p style={{ margin: 0, fontSize: 12 }}>{post.title}</p>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div style={{ padding: 15 }}>No notifications</div>
+      )}
+    </div>
+  )}
+</div>
+
           <div className="icon-circle"><FaFacebookMessenger /></div>
           <div className="icon-circle"><FaCog /></div>
           <img src={teacher?.profileImage || "/default-profile.png"} alt="teacher" className="profile-img" />
@@ -161,6 +303,9 @@ function TeacherNotesPage() {
             </Link>
             <Link className="sidebar-btn" to="/marks"><FaClipboardCheck /> Marks</Link>
             <Link className="sidebar-btn" to="/attendance"><FaUsers /> Attendance</Link>
+            <Link className="sidebar-btn" to="/schedule" >
+                                             <FaUsers /> Schedule
+                                           </Link>
             <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
             <button className="sidebar-btn logout-btn" onClick={handleLogout}><FaSignOutAlt /> Logout</button>
           </div>
@@ -175,6 +320,9 @@ function TeacherNotesPage() {
           minHeight: "100vh",
           fontFamily: "'Inter', sans-serif",
         }}>
+
+
+
 
           {/* Page Header */}
           <div style={{

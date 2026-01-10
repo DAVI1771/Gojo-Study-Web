@@ -9,9 +9,7 @@ function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [teacherInfo, setTeacherInfo] = useState(null);
-  const [selectedGrade, setSelectedGrade] = useState("All");
-  const [selectedSection, setSelectedSection] = useState("All");
-  const [sections, setSections] = useState([]);
+ 
   const [attendance, setAttendance] = useState({});
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -171,45 +169,35 @@ function AttendancePage() {
   }, [selectedCourse, date]);
 
   // ---------------- MARK ATTENDANCE ----------------
-  const handleMark = (studentId, status) => {
-    setAttendance(prev => ({ ...prev, [studentId]: status }));
-  };
+const handleMark = (studentId, status) => {
+  setAttendance(prev => ({ ...prev, [studentId]: status }));
+};
 
-  const handleSave = async () => {
-    if (!selectedCourse) {
-      alert("Please select a course");
-      return;
-    }
 
-    try {
-      await axios.put(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance/${selectedCourse.id}/${date}.json`,
-        attendance
-      );
-      alert("Attendance saved successfully!");
-    } catch (err) {
-      console.error("Error saving attendance:", err);
-      alert("Failed to save attendance");
-    }
-  };
+ const handleSave = async () => {
+  if (!selectedCourse) {
+    alert("Please select a course");
+    return;
+  }
 
-  // ---------------- FILTER GRADES & SECTIONS ----------------
-  useEffect(() => {
-    if (selectedGrade === "All") {
-      setSections([]);
-      setSelectedSection("All");
-    } else {
-      const gradeSections = [...new Set(students.filter(s => s.grade === selectedGrade).map(s => s.section))];
-      setSections(gradeSections);
-      setSelectedSection("All");
-    }
-  }, [selectedGrade, students]);
+  try {
+    await axios.put(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance/${selectedCourse.id}/${date}.json`,
+      attendance
+    );
+    alert("Attendance saved successfully!");
+  } catch (err) {
+    console.error("Error saving attendance:", err);
+    alert("Failed to save attendance");
+  }
+};
 
-  const filteredStudents = students.filter(s => {
-    if (selectedGrade !== "All" && s.grade !== selectedGrade) return false;
-    if (selectedSection !== "All" && s.section !== selectedSection) return false;
-    return true;
-  });
+
+
+const filteredStudents = students.filter(
+  s => s.grade === selectedCourse?.grade && s.section === selectedCourse?.section
+);
+
 
   const grades = [...new Set(students.map(s => s.grade))].sort();
 
@@ -277,6 +265,9 @@ function AttendancePage() {
                    <Link className="sidebar-btn" to="/attendance" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}>
                      <FaUsers /> Attendance
                    </Link>
+                   <Link className="sidebar-btn" to="/schedule" >
+                                                    <FaUsers /> Schedule
+                                                  </Link>
                    <Link className="sidebar-btn" to="/settings">
                      <FaCog /> Settings
                    </Link>
@@ -288,116 +279,168 @@ function AttendancePage() {
        
 
         {/* MAIN CONTENT */}
-        <div style={{ flex: 1, display: "flex", justifyContent: "center", padding: "30px" }}>
-          <div style={{ width: "80%", position: "relative", marginLeft: "500px" }}>
-            <h2 style={{ textAlign: "center", marginBottom: "20px" }}>Attendance</h2>
+       {/* MAIN CONTENT */}
+<div style={{ flex: 1, display: "flex", justifyContent: "center", padding: "30px", background: "#f0f4f8" }}>
+  <div style={{ width: "60%", position: "relative", marginLeft: "330px", padding: "30px", borderRadius: "15px", background: "#fff", boxShadow: "0 8px 20px rgba(0,0,0,0.1)" }}>
+    <h2 style={{ textAlign: "center", marginBottom: "25px", color: "#333" }}>Attendance</h2>
 
-            {/* Course Selection */}
-            <div style={{ marginBottom: "15px" }}>
-              <label>
-                Select Course:{" "}
-                <select
-                  value={selectedCourse?.id || ""}
-                  onChange={e => {
-                    const course = courses.find(c => c.id === e.target.value);
-                    setSelectedCourse(course || null);
+    {/* Course Selection */}
+    <div style={{ marginBottom: "20px", display: "flex", alignItems: "center", gap: "15px" }}>
+      <label style={{ fontWeight: "500", color: "#555" }}>Select Course:</label>
+      <select
+        value={selectedCourse?.id || ""}
+        onChange={e => {
+          const course = courses.find(c => c.id === e.target.value);
+          setSelectedCourse(course || null);
+        }}
+        style={{
+          padding: "8px 12px",
+          borderRadius: "8px",
+          border: "1px solid #ccc",
+          outline: "none",
+          background: "#f9f9f9",
+          minWidth: "200px",
+          fontWeight: "500"
+        }}
+      >
+        <option value="">-- Select Course --</option>
+        {courses.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.name} - Grade {c.grade} Section {c.section}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    {/* Date Selection */}
+    <div style={{ marginBottom: "25px", display: "flex", alignItems: "center", gap: "15px" }}>
+      <label style={{ fontWeight: "500", color: "#555" }}>Date:</label>
+      <input
+        type="date"
+        value={date}
+        onChange={e => setDate(e.target.value)}
+        style={{
+          padding: "8px 12px",
+          borderRadius: "8px",
+          border: "1px solid #ccc",
+          outline: "none",
+          background: "#f9f9f9"
+        }}
+      />
+    </div>
+
+    {/* Attendance Table */}
+    {loading ? (
+      <p>Loading students...</p>
+    ) : error ? (
+      <p style={{ color: "red" }}>{error}</p>
+    ) : (
+      <table style={{ width: "100%", borderCollapse: "collapse", boxShadow: "0 4px 10px rgba(0,0,0,0.05)" }}>
+        <thead>
+          <tr style={{ background: "#4b6cb7", color: "#fff", textAlign: "left" }}>
+            <th style={{ padding: "12px" }}>Student</th>
+            <th style={{ padding: "12px", textAlign: "center" }}>Present</th>
+            <th style={{ padding: "12px", textAlign: "center" }}>Absent</th>
+            <th style={{ padding: "12px", textAlign: "center" }}>Late</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredStudents.map(s => (
+            <tr key={s.studentId} style={{ borderBottom: "1px solid #eee", transition: "background 0.3s" }} 
+                onMouseEnter={e => e.currentTarget.style.background = "#f9f9f9"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <td style={{ padding: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "40px", height: "40px", borderRadius: "50%", overflow: "hidden", border: "2px solid #4b6cb7" }}>
+                  <img src={s.profileImage || "/default-profile.png"} alt={s.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+                <span style={{ fontWeight: "500", color: "#333" }}>{s.name}</span>
+              </td>
+
+              {/* Present */}
+              <td style={{ padding: "10px", textAlign: "center" }}>
+                <button
+                  style={{
+                    background: attendance[s.studentId] === "present" ? "#28a745" : "#e0e0e0",
+                    color: attendance[s.studentId] === "present" ? "#fff" : "#333",
+                    padding: "6px 12px",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    transition: "0.2s"
                   }}
-                  style={{ padding: "6px 10px", borderRadius: "5px" }}
+                  onClick={() => handleMark(s.studentId, "present")}
                 >
-                  <option value="">-- Select Course --</option>
-                  {courses.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} - Grade {c.grade} Section {c.section}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+                  Present
+                </button>
+              </td>
 
-            {/* Grades & Sections */}
-            <div style={{ display: "flex", gap: "10px", marginBottom: "15px", flexWrap: "wrap" }}>
-              <button onClick={() => setSelectedGrade("All")} style={{ padding: "8px 15px", borderRadius: "8px", background: selectedGrade === "All" ? "#4b6cb7" : "#ddd", color: selectedGrade === "All" ? "#fff" : "#000", border: "none" }}>All Grades</button>
-              {grades.map(g => (
-                <button key={g} onClick={() => setSelectedGrade(g)} style={{ padding: "8px 15px", borderRadius: "8px", background: selectedGrade === g ? "#4b6cb7" : "#ddd", color: selectedGrade === g ? "#fff" : "#000", border: "none" }}>Grade {g}</button>
-              ))}
-            </div>
+              {/* Absent */}
+              <td style={{ padding: "10px", textAlign: "center" }}>
+                <button
+                  style={{
+                    background: attendance[s.studentId] === "absent" ? "#dc3545" : "#e0e0e0",
+                    color: attendance[s.studentId] === "absent" ? "#fff" : "#333",
+                    padding: "6px 12px",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    transition: "0.2s"
+                  }}
+                  onClick={() => handleMark(s.studentId, "absent")}
+                >
+                  Absent
+                </button>
+              </td>
 
-            {selectedGrade !== "All" && sections.length > 0 && (
-              <div style={{ display: "flex", gap: "10px", marginBottom: "20px", flexWrap: "wrap" }}>
-                <button onClick={() => setSelectedSection("All")} style={{ padding: "6px 12px", borderRadius: "8px", background: selectedSection === "All" ? "#4b6cb7" : "#ddd", color: selectedSection === "All" ? "#fff" : "#000", border: "none" }}>All Sections</button>
-                {sections.map(sec => (
-                  <button key={sec} onClick={() => setSelectedSection(sec)} style={{ padding: "6px 12px", borderRadius: "8px", background: selectedSection === sec ? "#4b6cb7" : "#ddd", color: selectedSection === sec ? "#fff" : "#000", border: "none" }}>Section {sec}</button>
-                ))}
-              </div>
-            )}
+              {/* Late */}
+              {/* Late */}
+<td style={{ padding: "10px", textAlign: "center" }}>
+  <button
+    style={{
+      background: attendance[s.studentId] === "late" ? "#ffc107" : "#e0e0e0",
+      color: attendance[s.studentId] === "late" ? "#fff" : "#333",
+      padding: "6px 12px",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      transition: "0.2s"
+    }}
+    onClick={() => handleMark(s.studentId, "late")}
+  >
+    Late
+  </button>
+</td>
 
-            {/* Date Selection */}
-            <div style={{ marginBottom: "15px" }}>
-              <label>Date: <input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
-            </div>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
 
-            {/* Attendance Table */}
-            {loading ? <p>Loading students...</p> :
-              error ? <p style={{ color: "red" }}>{error}</p> :
-              <table style={{ width: "50%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ background: "#f4f6ff" }}>
-                    <th style={{ padding: "10px", border: "1px solid #ddd" }}>Student</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd" }}>Present</th>
-                    <th style={{ padding: "10px", border: "1px solid #ddd" }}>Absent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredStudents.map(s => (
-                    <tr key={s.studentId}>
-                      <td style={{ padding: "10px", border: "1px solid #ddd", display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div style={{ width: "35px", height: "35px", borderRadius: "50%", overflow: "hidden", border: "2px solid #e61d03" }}>
-                          <img src={s.profileImage || "/default-profile.png"} alt={s.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        </div>
-                        <span>{s.name}</span>
-                      </td>
-                      <td style={{ padding: "10px", width: "100px", border: "1px solid #ddd" }}>
-                        <button
-                          style={{
-                            background: attendance[s.studentId] === "present" ? "green" : "#eee",
-                            color: attendance[s.studentId] === "present" ? "#fff" : "#000",
-                            padding: "5px 10px",
-                            border: "none",
-                            borderRadius: "5px",
-                          }}
-                          onClick={() => handleMark(s.studentId, "present")}
-                        >
-                          Present
-                        </button>
-                      </td>
-                      <td style={{ padding: "10px", width: "100px", border: "1px solid #ddd" }}>
-                        <button
-                          style={{
-                            background: attendance[s.studentId] === "absent" ? "red" : "#eee",
-                            color: attendance[s.studentId] === "absent" ? "#fff" : "#000",
-                            padding: "5px 10px",
-                            border: "none",
-                            borderRadius: "5px",
-                          }}
-                          onClick={() => handleMark(s.studentId, "absent")}
-                        >
-                          Absent
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            }
+    <div style={{ textAlign: "center" }}>
+      <button
+        style={{
+          marginTop: "25px",
+          padding: "12px 25px",
+          borderRadius: "10px",
+          background: "#4b6cb7",
+          color: "#fff",
+          fontWeight: "600",
+          border: "none",
+          cursor: "pointer",
+          boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+          transition: "0.3s"
+        }}
+        onClick={handleSave}
+        onMouseEnter={e => e.currentTarget.style.background = "#3a539b"}
+        onMouseLeave={e => e.currentTarget.style.background = "#4b6cb7"}
+      >
+        Save Attendance
+      </button>
+    </div>
+  </div>
+</div>
 
-            <button
-              style={{ marginTop: "20px", padding: "10px 20px", borderRadius: "8px", background: "#4b6cb7", color: "#fff", border: "none" }}
-              onClick={handleSave}
-            >
-              Save Attendance
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
