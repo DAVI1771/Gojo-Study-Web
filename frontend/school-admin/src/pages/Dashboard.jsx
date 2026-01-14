@@ -17,11 +17,13 @@ function Dashboard() {
   // ---------------- STATE ----------------
 const [admin, setAdmin] = useState({
   adminId: "",
+  userId: "",          // ✅ ADD THIS
   name: "",
   username: "",
   profileImage: "/default-profile.png",
   isActive: false,
 });
+
 
   const [posts, setPosts] = useState([]);
   const [postText, setPostText] = useState("");
@@ -44,6 +46,10 @@ const scrollToPostId = location.state?.scrollToPostId;
 const postIdToScroll = location.state?.postId;
 const postId = location.state?.postId;
 
+const [currentChat, setCurrentChat] = useState([]);
+const [loadingAdmin, setLoadingAdmin] = useState(true);
+
+
 
 const adminUserId = admin.userId;
 const [showPostDropdown, setShowPostDropdown] = useState(false);
@@ -62,84 +68,51 @@ useEffect(() => {
 }, [postId]);
   // ---------------- HELPER: LOAD ADMIN FROM LOCALSTORAGE ----------------
   const loadAdminFromStorage = async () => {
-    console.log("Loading admin from storage...");
-    const storedAdmin = localStorage.getItem("admin");
-    console.log("Stored admin data:", storedAdmin);
-    
-    if (storedAdmin) {
-      try {
-        const adminData = JSON.parse(storedAdmin);
-        console.log("Parsed admin data:", adminData);
-        
-        // If we have adminId, get it directly from School_Admin
-        if (adminData.adminId) {
-          console.log("Getting admin data for adminId:", adminData.adminId);
-          
-          // Get specific admin from School_Admin using adminId
-          const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admin/${adminData.adminId}.json`);
-          console.log("School_Admin response:", res.data);
-          
-          if (res.data) {
-            // Get user details from Users node using userId from School_Admin
-            if (res.data.userId) {
-              console.log("Fetching user data for userId:", res.data.userId);
-              const userRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${res.data.userId}.json`);
-              console.log("Users response:", userRes.data);
-              
-              if (userRes.data) {
-                // Combine School_Admin data with Users data
-                const combinedAdmin = {
-                  adminId: adminData.adminId, // Use the adminId from localStorage/Posts
-                  ...res.data,
-                  name: userRes.data.name || res.data.name,
-                  username: userRes.data.username,
-                  profileImage: userRes.data.profileImage || res.data.profileImage,
-                };
-                console.log("Combined admin data:", combinedAdmin);
-                setAdmin(combinedAdmin);
-              } else {
-                console.log("Using School_Admin data only");
-                setAdmin({
-                  adminId: adminData.adminId,
-                  ...res.data
-                });
-              }
-            } else {
-              console.log("No userId in School_Admin, using School_Admin data only");
-              setAdmin({
-                adminId: adminData.adminId,
-                ...res.data
-              });
-            }
-          } else {
-            console.log("Admin not found in School_Admin, clearing storage");
-            localStorage.removeItem("admin");
-            setAdmin({
-              adminId: "",
-              name: "",
-              username: "",
-              profileImage: "/default-profile.png",
-              isActive: false,
-            });
-          }
-        } else {
-          console.log("No adminId in stored admin data");
-          localStorage.removeItem("admin");
-          setAdmin({
-            adminId: "",
-            name: "",
-            username: "",
-            profileImage: "/default-profile.png",
-            isActive: false,
-          });
-        }
-      } catch (err) {
-        console.error("Error loading admin from School_Admin:", err);
-      }
-    } else {
-      console.log("No admin found in localStorage");
+  const storedAdmin = localStorage.getItem("admin");
+
+  if (!storedAdmin) {
+    setLoadingAdmin(false);
+    return;
+  }
+
+  try {
+    const adminData = JSON.parse(storedAdmin);
+
+    if (!adminData.adminId) {
+      localStorage.removeItem("admin");
+      setLoadingAdmin(false);
+      return;
     }
-  };
+
+    const res = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins/${adminData.adminId}.json`
+    );
+
+    if (!res.data) {
+      localStorage.removeItem("admin");
+      setLoadingAdmin(false);
+      return;
+    }
+
+    const userRes = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${res.data.userId}.json`
+    );
+
+    setAdmin({
+      adminId: adminData.adminId,
+      userId: res.data.userId,
+      name: userRes.data?.name || "Admin",
+      username: userRes.data?.username || "",
+      profileImage: userRes.data?.profileImage || "/default-profile.png",
+    });
+
+  } catch (e) {
+    localStorage.removeItem("admin");
+  }
+
+  setLoadingAdmin(false);
+
+};
 
 const handleOpenChat = (user, userType) => {
   navigate("/all-chat", {
@@ -494,118 +467,71 @@ useEffect(() => {
   }, []);
 
   // Add this effect to monitor admin state changes
-  useEffect(() => {
-    console.log("Admin state updated:", admin);
-    if (!admin.userId) {
-      console.log("Admin not loaded, checking localStorage...");
-      const storedAdmin = localStorage.getItem("admin");
-      console.log("localStorage admin:", storedAdmin);
-      if (storedAdmin) {
-        console.log("Found admin in localStorage, reloading...");
-        loadAdminFromStorage();
-      } else {
-        console.log("No admin in localStorage, redirecting to login...");
-        window.location.href = "/login";
-      }
-    }
-  }, [admin.userId]);
+useEffect(() => {
+  if (loadingAdmin) return;
 
- //
+  if (!admin.userId) {
+    console.log("No admin found, redirecting to login");
+    navigate("/login", { replace: true });
+  }
+}, [loadingAdmin, admin.userId]);
+
+ 
 const handlePost = async () => {
-  console.log("handlePost called");
-  console.log("postText:", postText);
-  console.log("postMedia:", postMedia);
-  console.log("admin state:", admin);
-  
-  if (!postText && !postMedia) return alert("Enter message or select media");
-  
-  // Check if admin is loaded - use localStorage data directly if needed
-  if (!admin.adminId || !admin.userId || admin.userId === '' || admin.userId === undefined) {
-    console.log("Admin not loaded properly, using localStorage fallback...");
-    
-    // Try to get admin data directly from localStorage
-    const storedAdmin = localStorage.getItem("admin");
-    if (storedAdmin) {
-      const adminData = JSON.parse(storedAdmin);
-      console.log("Using stored admin data directly:", adminData);
-      
-      // Use stored data directly for posting
-      if (adminData.adminId) {
-        const formData = new FormData();
-        formData.append("message", postText);
-        formData.append("adminId", adminData.adminId);
-        formData.append("adminName", adminData.name || "Admin");
-        formData.append("adminProfile", adminData.profileImage || "/default-profile.png");
-        
-        if (postMedia) formData.append("post_media", postMedia);
-        
-        try {
-          console.log("Sending request with stored admin data...");
-          const response = await axios.post("http://127.0.0.1:5000/api/create_post", formData);
-          console.log("Response:", response);
-          setPostText("");
-          setPostMedia(null);
-          fetchPosts();
-          return;
-        } catch (err) {
-          console.error("Error creating post:", err);
-          alert("Error creating post: " + (err.response?.data?.message || err.message));
-        }
-      }
-    }
-    
-    return alert("Please log in again to refresh admin data.");
+  if (!postText && !postMedia) return;
+
+  if (!admin.adminId || !admin.userId) {
+    alert("Session expired");
+    return;
   }
 
   const formData = new FormData();
   formData.append("message", postText);
 
-  console.log("Appending adminId:", admin.adminId);
-  formData.append("adminId", admin.adminId);
-
-  console.log("Appending adminName:", admin.name);
+  // ✅ CORRECT
+  formData.append("adminId", admin.adminId); // ownership
+  formData.append("userId", admin.userId);   // display & likes
   formData.append("adminName", admin.name);
   formData.append("adminProfile", admin.profileImage);
 
   if (postMedia) formData.append("post_media", postMedia);
 
-  try {
-    console.log("Sending request to backend...");
-    const response = await axios.post("http://127.0.0.1:5000/api/create_post", formData);
-    console.log("Response:", response);
-    setPostText("");
-    setPostMedia(null);
-    fetchPosts();
-  } catch (err) {
-    console.error("Error creating post:", err);
-    alert("Error creating post: " + (err.response?.data?.message || err.message));
-  }
+  await axios.post("http://127.0.0.1:5000/api/create_post", formData);
+
+  setPostText("");
+  setPostMedia(null);
+  fetchPosts();
 };
+
+
+
+  
 
 
   // ---------------- HANDLE LIKE ----------------
 
 const handleLike = async (postId) => {
   try {
-   const res = await axios.post("http://127.0.0.1:5000/api/like_post", {
-  adminId: admin.adminId,
-  postId,
-});
-
+    // ✅ Use full backend URL
+    const res = await axios.post(`http://127.0.0.1:5000/api/like_post`, {
+      postId,
+      adminId: admin.userId, // or admin.adminId if your backend expects it
+    });
 
     if (res.data.success) {
-      // Update posts state
+      const liked = res.data.liked; // boolean returned by backend
+      const likeCount = res.data.likeCount; // number returned by backend
+
       setPosts((prevPosts) =>
         prevPosts.map((post) =>
           post.postId === postId
             ? {
                 ...post,
-                likeCount: res.data.likeCount,
-               likes: {
-  ...post.likes,
-  [admin.userId]: res.data.liked ? true : undefined
-},
-
+                likeCount,
+                likes: {
+                  ...post.likes,
+                  [admin.userId]: liked ? true : undefined,
+                },
               }
             : post
         )
@@ -615,7 +541,6 @@ const handleLike = async (postId) => {
     console.error("Error liking post:", err);
   }
 };
-
 
 
   // ---------------- HANDLE DELETE ----------------

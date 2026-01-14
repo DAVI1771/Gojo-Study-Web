@@ -9,7 +9,8 @@ import { format, parseISO, startOfWeek, startOfMonth } from "date-fns";
 import { useMemo } from "react";
 import { getDatabase, ref, onValue, push, update } from "firebase/database";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
-import { app } from "../firebaseConfig"; // your firebase config file
+
+import app, { db } from "../firebase"; // Adjust the path if needed
 
 
 function StudentsPage() {
@@ -31,8 +32,11 @@ function StudentsPage() {
   const [unreadMap, setUnreadMap] = useState({});
   const navigate = useNavigate();
   const admin = JSON.parse(localStorage.getItem("admin")) || {}; // Admin info from localStorage
-  const [attendanceView, setAttendanceView] = useState("daily"); 
-  const [attendanceCourseFilter, setAttendanceCourseFilter] = useState("All");
+ 
+const [studentMarks, setStudentMarks] = useState({});
+const [attendanceView, setAttendanceView] = useState("daily");
+const [attendanceCourseFilter, setAttendanceCourseFilter] = useState("All");
+const [expandedCards, setExpandedCards] = useState({});
 
   const [teachers, setTeachers] = useState([]);
 const [unreadTeachers, setUnreadTeachers] = useState({});
@@ -42,7 +46,10 @@ const [selectedTeacher, setSelectedTeacher] = useState(null);
 const [teacherChatOpen, setTeacherChatOpen] = useState(false);
 const [postNotifications, setPostNotifications] = useState([]);
 const [showPostDropdown, setShowPostDropdown] = useState(false);
-
+ const [newMessageText, setNewMessageText] = useState("");
+const [lastMessages, setLastMessages] = useState({});
+// At the top of your StudentsPage component
+const [expandedSubjects, setExpandedSubjects] = useState([]); 
 
 const adminId = admin.userId;
 
@@ -68,6 +75,8 @@ const fetchPostNotifications = async () => {
     console.error("Post notification fetch failed", err);
   }
 };
+
+
 
 useEffect(() => {
   if (!adminId) return;
@@ -97,6 +106,12 @@ const handleNotificationClick = async (notification) => {
     state: { postId: notification.postId }
   });
 };
+
+ const handleSendMessage = () => {
+    // now newMessageText is defined
+    console.log("Sending message:", newMessageText);
+    // your code to send the message
+  };
 
 useEffect(() => {
   const closeDropdown = (e) => {
@@ -144,96 +159,71 @@ const handleSelectStudent = async (s) => {
   setLoading(true);
   try {
     // 1️⃣ Fetch user info
-    const userRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`);
+    const userRes = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`
+    );
     const user = userRes.data || {};
 
-    // 2️⃣ Fetch ClassMarks
-    const marksRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`);
+    // 2️⃣ Fetch ClassMarks from Firebase
+    const marksRes = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`
+    );
     const classMarks = marksRes.data || {};
 
     const studentMarks = {};
     const courseTeacherMap = {};
 
+    // Loop through all courses
     Object.entries(classMarks).forEach(([courseId, studentsObj]) => {
-      const studentMark = studentsObj?.[s.studentId]; // <-- FIX HERE
+      const studentMark = studentsObj?.[s.studentId];
       if (studentMark) {
         studentMarks[courseId] = {
           mark20: Number(studentMark.mark20 || 0),
           mark30: Number(studentMark.mark30 || 0),
           mark50: Number(studentMark.mark50 || 0),
-          teacherName: studentMark.teacherName || "Teacher"
+          teacherName: studentMark.teacherName || "Teacher",
         };
         courseTeacherMap[courseId] = studentMark.teacherName || "Teacher";
       }
     });
 
-    // 3️⃣ Fetch Attendance (works the same)
-    const attendanceRes = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`);
+    // 3️⃣ Fetch Attendance (optional)
+    const attendanceRes = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`
+    );
     const attendanceRaw = attendanceRes.data || {};
 
     const attendanceData = [];
     Object.entries(attendanceRaw).forEach(([courseId, datesObj]) => {
       Object.entries(datesObj || {}).forEach(([date, studentsObj]) => {
-        const status = studentsObj?.[s.studentId]; // <-- FIX HERE
+        const status = studentsObj?.[s.studentId];
         if (status) {
           attendanceData.push({
             courseId,
             date,
             status,
-            teacherName: courseTeacherMap[courseId] || "Teacher"
+            teacherName: courseTeacherMap[courseId] || "Teacher",
           });
         }
       });
     });
 
-    // 4️⃣ Set selected student
+    // 4️⃣ Set selected student state
     setSelectedStudent({
       ...s,
       ...user,
       marks: studentMarks,
-      attendance: attendanceData
+      attendance: attendanceData,
     });
 
   } catch (err) {
     console.error("Error fetching student data:", err);
   }
+
   setLoading(false);
 };
 
 
-// Grouped attendance based on the selected view
-const groupedAttendance = useMemo(() => {
-  if (!selectedStudent?.attendance?.length) return {};
-
-  const grouped = {};
-
-  selectedStudent.attendance.forEach(a => {
-    const dateObj = new Date(a.date);
-    if (isNaN(dateObj)) return;
-
-    let key = "";
-
-    if (attendanceView === "daily") {
-      key = a.date;
-    }
-
-    if (attendanceView === "weekly") {
-      key = format(
-        startOfWeek(dateObj, { weekStartsOn: 1 }),
-        "yyyy-MM-dd"
-      );
-    }
-
-    if (attendanceView === "monthly") {
-      key = format(dateObj, "yyyy-MM");
-    }
-
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(a);
-  });
-
-  return grouped;
-}, [selectedStudent, attendanceView]);
 
 
 
@@ -342,6 +332,33 @@ useEffect(() => {
   });
 
 
+ // ---------------- FETCH PERFORMANCE ----------------
+useEffect(() => {
+  if (!selectedStudent?.studentId) return;
+
+  async function fetchMarks() {
+    try {
+      const res = await axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json"
+      );
+
+      const marks = {};
+
+      Object.entries(res.data || {}).forEach(([courseId, students]) => {
+        if (students[selectedStudent.studentId]) {
+          marks[courseId] = students[selectedStudent.studentId];
+        }
+      });
+
+      setStudentMarks(marks);
+    } catch (err) {
+      console.error("Marks fetch error:", err);
+      setStudentMarks({});
+    }
+  }
+
+  fetchMarks();
+}, [selectedStudent]);
 
 
 
@@ -372,45 +389,63 @@ useEffect(() => {
 }, [students]);
 
 // ---------------- FETCH CHAT MESSAGES ----------------
-  useEffect(() => {
-    if (!studentChatOpen || !selectedStudent) return;
+ useEffect(() => {
+  if (!studentChatOpen || !selectedStudent) return;
 
-    const fetchMessages = async () => {
-      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
-      try {
-        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
-        const msgs = Object.values(res.data || {}).map(m => ({
-          ...m,
-          sender: m.senderId === adminUserId ? "admin" : "student"
-        })).sort((a, b) => a.timeStamp - b.timeStamp);
-        setPopupMessages(msgs);
-      } catch (err) {
-        console.error(err);
-        setPopupMessages([]);
-      }
-    };
+  const chatKey = `${selectedStudent.userId}_${adminUserId}`;
 
-    fetchMessages();
-  }, [studentChatOpen, selectedStudent, adminUserId]);
-
-  // ---------------- SEND MESSAGE ----------------
-  const sendPopupMessage = async () => {
-    if (!popupInput.trim() || !selectedStudent) return;
-    const newMessage = {
-      senderId: adminUserId,
-      receiverId: selectedStudent.userId,
-      text: popupInput,
-      timeStamp: Date.now()
-    };
+  const fetchMessages = async () => {
     try {
-      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
-      await axios.post(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, newMessage);
-      setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
-      setPopupInput("");
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+      );
+
+      const msgs = Object.values(res.data || {}).map(m => ({
+        ...m,
+        sender: m.senderId === adminUserId ? "admin" : "student"
+      })).sort((a, b) => a.timeStamp - b.timeStamp);
+
+      setPopupMessages(msgs);
     } catch (err) {
       console.error(err);
     }
   };
+
+  
+
+  fetchMessages();
+}, [studentChatOpen, selectedStudent, adminUserId]);
+
+
+
+
+
+  // ---------------- SEND MESSAGE ----------------
+const sendPopupMessage = async () => {
+  if (!popupInput.trim() || !selectedStudent) return;
+
+  const newMessage = {
+    senderId: adminUserId,
+    receiverId: selectedStudent.userId,
+    text: popupInput,
+    timeStamp: Date.now(),
+    seen: false
+  };
+
+  try {
+    const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+    await axios.post(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+      newMessage
+    );
+
+    setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+    setPopupInput("");
+  } catch (err) {
+    console.error(err);
+  }
+};
+
 
  // ---------------- FETCH UNREAD MESSAGES ----------------
 const fetchUnreadMessages = async () => {
@@ -629,7 +664,60 @@ const markMessagesAsSeen = async (userId) => {
   }
 };
 
+const attendanceData = React.useMemo(() => {
+  if (!selectedStudent?.attendance) return [];
 
+  return selectedStudent.attendance.map(a => ({
+    date: a.date || a.created_at,
+    courseId: a.courseId || a.course || "Unknown Course",
+    teacherName: a.teacherName || a.teacher || "Unknown Teacher",
+    status: a.status || a.attendance_status || "absent"
+  }));
+}, [selectedStudent]);
+
+const groupedAttendance = React.useMemo(() => {
+  if (!attendanceData.length) return {};
+
+  return attendanceData.reduce((acc, record) => {
+    const dateKey = new Date(record.date).toLocaleDateString();
+
+    if (!acc[dateKey]) acc[dateKey] = [];
+    acc[dateKey].push(record);
+
+    return acc;
+  }, {});
+}, [attendanceData]);
+
+
+const toggleExpand = (key) => {
+  setExpandedCards((prev) => ({
+    ...prev,
+    [key]: !prev[key],
+  }));
+};
+
+const getProgress = (records) => {
+  if (!records || !records.length) return 0;
+  const presentCount = records.filter(
+    (r) => r.status === "present" || r.status === "late"
+  ).length;
+  return Math.round((presentCount / records.length) * 100);
+};
+
+const attendanceBySubject = attendanceData.reduce((acc, cur) => {
+  if (!acc[cur.courseId]) acc[cur.courseId] = [];
+  acc[cur.courseId].push(cur);
+  return acc;
+}, {});
+
+const formatSubjectName = (courseId = "") => {
+  const clean = courseId
+    .replace("course_", "")
+    .replace(/_[0-9A-Za-z]+$/, "") // remove class like _9A
+    .replace(/_/g, " ");
+
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+};
 
 
   return (
@@ -1173,215 +1261,252 @@ const markMessagesAsSeen = async (userId) => {
   </div>
 )}
 
-
-
-
-            
-
 {/* ================= ATTENDANCE TAB ================= */}
 {studentTab === "attendance" && selectedStudent && (
-  <div style={{
-    padding: "20px",
-    maxHeight: "70vh",
-    overflowY: "auto",
-    background: "#f7f8fa",
-    fontFamily: "'Inter', sans-serif"
-  }}>
-
-    {/* ================= STICKY CONTROLS ================= */}
-    <div style={{
-      position: "sticky",
-      top: 0,
-      zIndex: 30,
-      background: "#ffffff",
-      padding: "12px 0 20px",
-      boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
-      borderBottomLeftRadius: "12px",
-      borderBottomRightRadius: "12px"
-    }}>
-      {/* View Switch */}
-      <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "12px" }}>
-        {["daily", "weekly", "monthly"].map(v => (
-          <button
-            key={v}
-            onClick={() => setAttendanceView(v)}
-            style={{
-              padding: "8px 20px",
-              borderRadius: "10px",
-              border: "1px solid #d1d5db",
-              fontWeight: 600,
-              cursor: "pointer",
-              fontSize: "13px",
-              background: attendanceView === v ? "#2563eb" : "#f3f4f6",
-              color: attendanceView === v ? "#ffffff" : "#374151",
-              transition: "all 0.3s"
-            }}
-          >
-            {v.toUpperCase()}
-          </button>
-        ))}
-      </div>
-
-      {/* Course Filter */}
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        <select
-          value={attendanceCourseFilter}
-          onChange={e => setAttendanceCourseFilter(e.target.value)}
+  <div
+    style={{
+      padding: 30,
+      background: "radial-gradient(circle at top,#eef2ff,#f8fafc)",
+      borderRadius: 26,
+      fontFamily: "Inter, system-ui",
+    }}
+  >
+    {/* ===== VIEW SWITCH ===== */}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        gap: 16,
+        marginBottom: 32,
+      }}
+    >
+      {["daily", "weekly", "monthly"].map((v) => (
+        <button
+          key={v}
+          onClick={() => setAttendanceView(v)}
           style={{
-            padding: "8px 14px",
-            borderRadius: "10px",
-            border: "1px solid #d1d5db",
-            fontWeight: 500,
-            background: "#ffffff",
-            fontSize: "13px",
-            transition: "all 0.3s",
-            cursor: "pointer"
+            padding: "12px 28px",
+            borderRadius: 999,
+            border: "none",
+            fontWeight: 800,
+            fontSize: 13,
+            letterSpacing: 1,
+            cursor: "pointer",
+            background:
+              attendanceView === v
+                ? "linear-gradient(135deg,#4f46e5,#2563eb)"
+                : "rgba(255,255,255,.8)",
+            color: attendanceView === v ? "#fff" : "#1f2937",
+            boxShadow:
+              attendanceView === v
+                ? "0 18px 40px rgba(79,70,229,.45)"
+                : "0 6px 14px rgba(0,0,0,.08)",
+            transition: "all .3s ease",
           }}
         >
-          <option value="All">All Subjects</option>
-          {[...new Set(selectedStudent.attendance.map(a => a.courseId))].map(c => (
-            <option key={c} value={c}>
-              {c.replace("course_", "").replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-      </div>
+          {v.toUpperCase()}
+        </button>
+      ))}
     </div>
 
-    {/* ================= SUMMARY CARD ================= */}
-    {(() => {
-      const data = selectedStudent.attendance;
-      const total = data.length;
-      const present = data.filter(a => a.status === "present").length;
-      const percent = total ? Math.round((present / total) * 100) : 0;
+    {/* ===== SUBJECT CARDS ===== */}
+    {Object.entries(attendanceBySubject)
+      .filter(
+        ([course]) =>
+          attendanceCourseFilter === "All" || course === attendanceCourseFilter
+      )
+      .map(([course, records]) => {
+        const today = new Date().toDateString();
+        const weekRecords = records.filter(
+          (r) => new Date(r.date).getWeek?.() === new Date().getWeek?.()
+        );
+        const monthRecords = records.filter(
+          (r) => new Date(r.date).getMonth() === new Date().getMonth()
+        );
 
-      const health =
-        percent >= 90 ? { label: "Excellent", color: "#16a34a" } :
-        percent >= 75 ? { label: "Good", color: "#2563eb" } :
-        { label: "At Risk", color: "#dc2626" };
+        const displayRecords =
+          attendanceView === "daily"
+            ? records.filter((r) => new Date(r.date).toDateString() === today)
+            : attendanceView === "weekly"
+            ? weekRecords
+            : monthRecords;
 
-      return (
-        <div style={{
-          background: "#ffffff",
-          borderRadius: "16px",
-          padding: "16px 20px",
-          margin: "16px 0",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
-          borderLeft: `4px solid ${health.color}`
-        }}>
-          <div>
-            <div style={{ fontSize: "12px", color: "#6b7280", letterSpacing: "0.5px" }}>
-              Attendance Health
-            </div>
-            <div style={{ fontSize: "22px", fontWeight: 700, color: health.color, marginTop: "2px" }}>
-              {health.label}
-            </div>
-          </div>
+        const progress = getProgress(displayRecords);
+        const expandKey = `${attendanceView}-${course}`;
 
-          {/* Minimal Progress Circle */}
-          <div style={{
-            width: "60px",
-            height: "60px",
-            borderRadius: "50%",
-            border: `5px solid #e5e7eb`,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            position: "relative"
-          }}>
-            <div style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "60px",
-              height: "60px",
-              borderRadius: "50%",
-              clip: "rect(0, 60px, 60px, 30px)",
-              background: "transparent"
-            }}>
-              <div style={{
-                width: "60px",
-                height: "60px",
-                borderRadius: "50%",
-                border: `5px solid ${health.color}`,
-                clip: "rect(0, 30px, 60px, 0)",
-                transform: `rotate(${(percent / 100) * 360}deg)`,
-                transformOrigin: "center",
-                transition: "transform 0.5s ease-in-out"
-              }} />
-            </div>
-            <div style={{
-              fontSize: "16px",
-              fontWeight: 600,
-              color: "#374151"
-            }}>{percent}%</div>
-          </div>
-        </div>
-      );
-    })()}
+        return (
+          <div
+            key={course}
+            style={{
+              background:
+                "linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,.85))",
+              backdropFilter: "blur(14px)",
+              borderRadius: 26,
+              padding: 26,
+              marginBottom: 26,
+              boxShadow: "0 30px 60px rgba(0,0,0,.12)",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            {/* Glow */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "radial-gradient(circle at top left,rgba(99,102,241,.15),transparent 60%)",
+                pointerEvents: "none",
+              }}
+            />
 
-    {/* ================= ATTENDANCE RECORDS ================= */}
-    {Object.entries(groupedAttendance).map(([group, records]) => {
-      const filtered = attendanceCourseFilter === "All"
-        ? records
-        : records.filter(r => r.courseId === attendanceCourseFilter || r.courseId.replace("course_", "").replace(/_/g," ").toLowerCase() === attendanceCourseFilter.toLowerCase());
-
-      if (!filtered.length) return null;
-
-      return (
-        <div key={group} style={{
-          background: "#ffffff",
-          borderRadius: "14px",
-          padding: "16px 18px",
-          marginBottom: "16px",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
-          borderLeft: "4px solid #2563eb"
-        }}>
-          <h3 style={{ color: "#1e40af", marginBottom: "12px", fontSize: "14px" }}>
-            📅 {group}
-          </h3>
-
-          {filtered.map((r, i) => (
-            <div key={i} style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto",
-              padding: "10px 0",
-              borderBottom: i !== filtered.length - 1 ? "1px solid #f3f4f6" : "none",
-              alignItems: "center",
-              gap: "10px"
-            }}>
+            {/* HEADER */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 18,
+              }}
+            >
               <div>
-                <div style={{ fontWeight: 700, fontSize: "15px", color: "#111827" }}>
-                  {r.courseId.replace("course_", "").replace(/_/g, " ")}
-                </div>
-                <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                  👨‍🏫 {r.teacherName}
-                </div>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: 20,
+                    fontWeight: 900,
+                    color: "#1e3a8a",
+                  }}
+                >
+                  📚 {formatSubjectName(course)}
+                </h3>
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    fontSize: 13,
+                    color: "#64748b",
+                  }}
+                >
+                  👨‍🏫 {records[0]?.teacherName}
+                </p>
               </div>
 
-              <span style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "5px 12px",
-                borderRadius: "999px",
-                fontWeight: 600,
-                fontSize: "13px",
-                background: r.status === "present" ? "#d1fae5" : "#fee2e2",
-                color: r.status === "present" ? "#166534" : "#991b1b",
-                boxShadow: "inset 0 1px 3px rgba(0,0,0,0.05)",
-                transition: "all 0.2s"
-              }}>
-                {r.status === "present" ? "✔" : "✖"} {r.status.toUpperCase()}
-              </span>
+              <div
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 999,
+                  fontSize: 13,
+                  fontWeight: 900,
+                  background:
+                    progress >= 75
+                      ? "linear-gradient(135deg,#22c55e,#16a34a)"
+                      : progress >= 50
+                      ? "linear-gradient(135deg,#facc15,#eab308)"
+                      : "linear-gradient(135deg,#ef4444,#dc2626)",
+                  color: "#fff",
+                  boxShadow: "0 10px 25px rgba(0,0,0,.25)",
+                }}
+              >
+                {progress}%
+              </div>
             </div>
-          ))}
-        </div>
-      );
-    })}
+
+            {/* PROGRESS BAR */}
+            <div
+              onClick={() => toggleExpand(expandKey)}
+              style={{
+                height: 16,
+                background: "#e5e7eb",
+                borderRadius: 999,
+                cursor: "pointer",
+                overflow: "hidden",
+                marginBottom: 10,
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${progress}%`,
+                  background:
+                    progress >= 75
+                      ? "linear-gradient(90deg,#22c55e,#16a34a)"
+                      : progress >= 50
+                      ? "linear-gradient(90deg,#facc15,#eab308)"
+                      : "linear-gradient(90deg,#ef4444,#dc2626)",
+                  transition: "width .5s cubic-bezier(.4,0,.2,1)",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#475569",
+                marginBottom: 12,
+                letterSpacing: 0.6,
+              }}
+            >
+              CLICK BAR TO VIEW {attendanceView.toUpperCase()} DETAILS
+            </div>
+
+            {/* EXPANDED DAYS */}
+            {expandedCards[expandKey] && (
+              <div
+                style={{
+                  marginTop: 14,
+                  background: "#f1f5f9",
+                  borderRadius: 18,
+                  padding: 14,
+                }}
+              >
+                {displayRecords.map((r, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "12px 8px",
+                      borderBottom:
+                        i !== displayRecords.length - 1
+                          ? "1px solid #e5e7eb"
+                          : "none",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#1f2937" }}>
+                      📅 {new Date(r.date).toDateString()}
+                    </span>
+
+                    <span
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 900,
+                        background:
+                          r.status === "present"
+                            ? "#dcfce7"
+                            : r.status === "late"
+                            ? "#fef3c7"
+                            : "#fee2e2",
+                        color:
+                          r.status === "present"
+                            ? "#166534"
+                            : r.status === "late"
+                            ? "#92400e"
+                            : "#991b1b",
+                      }}
+                    >
+                      {r.status.toUpperCase()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
   </div>
 )}
 
@@ -1390,86 +1515,183 @@ const markMessagesAsSeen = async (userId) => {
 
 
 
-
-
             {/* PERFORMANCE TAB */}
-            {studentTab === "performance" && (
-              <div>
-                {selectedStudent.marks && Object.keys(selectedStudent.marks).length === 0 ? (
-                  <p style={{ textAlign: "center", color: "#555" }}>🚫 No Performance Records</p>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                    {Object.entries(selectedStudent.marks).map(([courseId, m], idx) => {
-                     const total = (Number(m.mark20) || 0) + (Number(m.mark30) || 0) + (Number(m.mark50) || 0);
+            {/* PERFORMANCE TAB */}
+   {studentTab === "performance" && (
+  <div style={{ position: "relative", paddingBottom: "70px", background: "#f8fafc" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: "20px",
+        padding: "20px",
+      }}
+    >
+      {Object.keys(studentMarks).length === 0 ? (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "30px",
+            borderRadius: "18px",
+            background: "#ffffff",
+            color: "#475569",
+            fontSize: "16px",
+            fontWeight: "600",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+          }}
+        >
+          🚫 No Performance Records
+        </div>
+      ) : (
+        Object.entries(studentMarks).map(([courseId, marks], idx) => {
+          const assessments = marks.assessments || {};
+          const total = Object.values(assessments).reduce((sum, a) => sum + (a.score || 0), 0);
+          const maxTotal = Object.values(assessments).reduce((sum, a) => sum + (a.max || 0), 0);
+          const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
 
-                    const percentage = Math.min(total, 100);
+          const statusColor =
+            percentage >= 75
+              ? "#16a34a"
+              : percentage >= 50
+              ? "#f59e0b"
+              : "#dc2626";
 
-                      const statusColor = percentage >= 75 ? "#16a34a" : percentage >= 50 ? "#f59e0b" : "#dc2626";
-
-                      return (
-                        <div key={idx} style={{ padding: "18px", borderRadius: "20px", background: "#fff", boxShadow: "0 12px 30px rgba(0,0,0,0.08)" }}>
-                          <div style={{ fontSize: "16px", fontWeight: "800", marginBottom: "14px", color: "#2563eb" }}>
-                            {courseId.replace("course_", "").replace(/_/g, " ")}
-                          </div>
-
-                          {/* Circle Score */}
-                          <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
-                            <div style={{
-                              width: "90px",
-                              height: "90px",
-                              borderRadius: "50%",
-                              background: `conic-gradient(${statusColor} ${percentage * 3.6}deg, #e5e7eb 0deg)`,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}>
-                              <div style={{
-                                width: "66px",
-                                height: "66px",
-                                borderRadius: "50%",
-                                background: "#fff",
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}>
-                                <div style={{ fontSize: "18px", fontWeight: "800", color: statusColor }}>{total}</div>
-                                <div style={{ fontSize: "11px", color: "#64748b" }}>/100</div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Individual Marks */}
-                          {[{ key: "mark20", label: "Quiz", max: 20, color: "#2563eb" },
-                            { key: "mark30", label: "Test", max: 30, color: "#16a34a" },
-                            { key: "mark50", label: "Final", max: 50, color: "#ea580c" }].map(({ key, label, max, color }) => (
-                            <div key={key} style={{ marginBottom: "10px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", fontWeight: "600", color: "#334155" }}>
-                                <span>{label}</span>
-                                <span>{m[key] || 0} / {max}</span>
-                              </div>
-                              <div style={{ height: "6px", borderRadius: "999px", background: "#e5e7eb", marginTop: "5px", overflow: "hidden" }}>
-                                <div style={{ width: `${((m[key] || 0) / max) * 100}%`, height: "100%", background: color }} />
-                              </div>
-                            </div>
-                          ))}
-
-                          <div style={{ marginTop: "12px", textAlign: "center", fontSize: "13px", fontWeight: "700", color: statusColor }}>
-                            {percentage >= 75 ? "Excellent" : percentage >= 50 ? "Good" : "Needs Improvement"}
-                          </div>
-
-                        <div style={{ marginTop: "6px", textAlign: "center", fontSize: "12px", color: "#64748b" }}>
-  👨‍🏫 {m.teacherName}
-</div>
-
-
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+          return (
+            <div
+              key={idx}
+              style={{
+                padding: "18px",
+                borderRadius: "20px",
+                background: "#ffffff",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+                color: "#0f172a",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "16px",
+                  fontWeight: "800",
+                  marginBottom: "14px",
+                  textTransform: "capitalize",
+                  color: "#2563eb",
+                }}
+              >
+                {courseId.replace("course_", "").replace(/_/g, " ")}
               </div>
-            )}
+
+              {/* Score Circle */}
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+                <div
+                  style={{
+                    width: "90px",
+                    height: "90px",
+                    borderRadius: "50%",
+                    background: `conic-gradient(${statusColor} ${percentage * 3.6}deg, #e5e7eb 0deg)`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "66px",
+                      height: "66px",
+                      borderRadius: "50%",
+                      background: "#ffffff",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: statusColor }}>
+                      {total}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#64748b" }}>
+                      / {maxTotal}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Marks Bars */}
+              {Object.entries(assessments).map(([key, a]) => (
+                <div key={key} style={{ marginBottom: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#334155",
+                    }}
+                  >
+                    <span>{a.name}</span>
+                    <span>
+                      {a.score} / {a.max}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: "6px",
+                      borderRadius: "999px",
+                      background: "#e5e7eb",
+                      marginTop: "5px",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${(a.score / a.max) * 100}%`,
+                        height: "100%",
+                        background:
+                          a.max >= 50
+                            ? "#ea580c"
+                            : a.max >= 30
+                            ? "#16a34a"
+                            : "#2563eb",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {/* Status */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  textAlign: "center",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  color: statusColor,
+                }}
+              >
+                {percentage >= 75
+                  ? "Excellent"
+                  : percentage >= 50
+                  ? "Good"
+                  : "Needs Improvement"}
+              </div>
+
+              {/* Teacher */}
+              <div
+                style={{
+                  marginTop: "6px",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  color: "#64748b",
+                }}
+              >
+                👨‍🏫 {marks.teacherName}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  </div>
+)}
           </>
         )}
       </div>

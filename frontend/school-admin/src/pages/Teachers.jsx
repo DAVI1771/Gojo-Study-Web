@@ -257,14 +257,16 @@ useEffect(() => {
 
   const fetchMessages = async () => {
     try {
-      // Always use teacherUserId_adminUserId
-      const chatKey = `${selectedTeacher.userId}_${adminUserId}`;
+      const chatKey = getChatKey(selectedTeacher.userId, adminUserId);
 
-      const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+      );
 
-      const msgs = Object.values(res.data || {}).map(m => ({
-        ...m,
-        sender: m.senderId === adminUserId ? "admin" : "teacher"
+      const msgs = Object.entries(res.data || {}).map(([id, msg]) => ({
+        messageId: id,
+        ...msg,
+        sender: msg.senderId === adminUserId ? "admin" : "teacher"
       })).sort((a, b) => a.timeStamp - b.timeStamp);
 
       setPopupMessages(msgs);
@@ -276,29 +278,78 @@ useEffect(() => {
 
   fetchMessages();
 }, [teacherChatOpen, selectedTeacher, adminUserId]);
+
 // ---------------- SEND POPUP MESSAGE ----------------
-
-
 const sendPopupMessage = async () => {
   if (!popupInput.trim() || !selectedTeacher) return;
 
   const newMessage = {
     senderId: adminUserId,
     receiverId: selectedTeacher.userId,
+    type: "text",
     text: popupInput,
+    imageUrl: null,
+    replyTo: null,
+    seen: false,
+    edited: false,
+    deleted: false,
     timeStamp: Date.now()
   };
 
-  try {
-    // Always use teacherUserId_adminUserId
-    const chatKey =  `${selectedTeacher.userId}_${adminUserId}`;
-    const url = `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`;
+  const chatKey = getChatKey(selectedTeacher.userId, adminUserId);
 
-    await axios.post(url, newMessage);
+  try {
+    await axios.post(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+      newMessage
+    );
+
     setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
     setPopupInput("");
   } catch (err) {
     console.error(err);
+  }
+};
+
+const markMessagesAsSeen = async (userId) => {
+  const chatKey = getChatKey(userId, adminUserId);
+
+  try {
+    const res = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+    );
+
+    const updates = {};
+    Object.entries(res.data || {}).forEach(([msgId, msg]) => {
+      if (msg.receiverId === adminUserId && !msg.seen) {
+        updates[`${msgId}/seen`] = true;
+      }
+    });
+
+    if (Object.keys(updates).length > 0) {
+      await axios.patch(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+        updates
+      );
+    }
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const getUnreadCount = async (userId) => {
+  const chatKey = getChatKey(userId, adminUserId);
+
+  try {
+    const res = await axios.get(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+    );
+
+    const msgs = Object.values(res.data || {});
+    return msgs.filter(m => m.receiverId === adminUserId && !m.seen).length;
+  } catch (err) {
+    console.error(err);
+    return 0;
   }
 };
 
@@ -475,35 +526,6 @@ useEffect(() => {
 
 
 
-const markMessagesAsSeen = async (userId) => {
-  const key1 = `${admin.userId}_${userId}`;
-  const key2 = `${userId}_${admin.userId}`;
-
-  const [r1, r2] = await Promise.all([
-    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
-    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
-  ]);
-
-  const updates = {};
-
-  const collectUpdates = (data, basePath) => {
-    Object.entries(data || {}).forEach(([msgId, msg]) => {
-      if (msg.receiverId === admin.userId && !msg.seen) {
-        updates[`${basePath}/${msgId}/seen`] = true;
-      }
-    });
-  };
-
-  collectUpdates(r1.data, `Chats/${key1}/messages`);
-  collectUpdates(r2.data, `Chats/${key2}/messages`);
-
-  if (Object.keys(updates).length > 0) {
-    await axios.patch(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
-      updates
-    );
-  }
-};
 
 
 
@@ -774,7 +796,7 @@ const markMessagesAsSeen = async (userId) => {
           <h2 style={{ marginBottom: "10px", textAlign: "center" }}>Teachers</h2>
 
           {/* Grade Filter */}
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", marginLeft: "280px" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px" }}>
             <div style={{ display: "flex", gap: "12px" }}>
               {["All", "9", "10", "11", "12"].map(g => (
                 <button
