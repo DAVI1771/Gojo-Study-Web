@@ -32,120 +32,114 @@ function StudentsPage() {
   const [unreadMap, setUnreadMap] = useState({});
   const navigate = useNavigate();
   const admin = JSON.parse(localStorage.getItem("admin")) || {}; // Admin info from localStorage
- 
-const [studentMarks, setStudentMarks] = useState({});
-const [attendanceView, setAttendanceView] = useState("daily");
-const [attendanceCourseFilter, setAttendanceCourseFilter] = useState("All");
-const [expandedCards, setExpandedCards] = useState({});
+
+  const [studentMarks, setStudentMarks] = useState({});
+  const [attendanceView, setAttendanceView] = useState("daily");
+  const [attendanceCourseFilter, setAttendanceCourseFilter] = useState("All");
+  const [expandedCards, setExpandedCards] = useState({});
 
   const [teachers, setTeachers] = useState([]);
-const [unreadTeachers, setUnreadTeachers] = useState({});
-const [unreadSenders, setUnreadSenders] = useState([]); 
-const [showMessageDropdown, setShowMessageDropdown] = useState(false);
-const [selectedTeacher, setSelectedTeacher] = useState(null);
-const [teacherChatOpen, setTeacherChatOpen] = useState(false);
-const [postNotifications, setPostNotifications] = useState([]);
-const [showPostDropdown, setShowPostDropdown] = useState(false);
- const [newMessageText, setNewMessageText] = useState("");
-const [lastMessages, setLastMessages] = useState({});
-// At the top of your StudentsPage component
-const [expandedSubjects, setExpandedSubjects] = useState([]); 
+  const [unreadTeachers, setUnreadTeachers] = useState({});
+  const [unreadSenders, setUnreadSenders] = useState([]); 
+  const [showMessageDropdown, setShowMessageDropdown] = useState(false);
+  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [teacherChatOpen, setTeacherChatOpen] = useState(false);
+  const [postNotifications, setPostNotifications] = useState([]);
+  const [showPostDropdown, setShowPostDropdown] = useState(false);
+  const [newMessageText, setNewMessageText] = useState("");
+  const [lastMessages, setLastMessages] = useState({});
+  // At the top of your StudentsPage component
+  const [expandedSubjects, setExpandedSubjects] = useState([]); 
 
-const adminId = admin.userId;
+  // Semester selection for performance tab
+  const [activeSemester, setActiveSemester] = useState("semester2");
 
+  const adminId = admin.userId;
+  const adminUserId = admin.userId;
 
-const adminUserId = admin.userId;
+  const db = getDatabase(app);
 
-const db = getDatabase(app);
+  const fetchPostNotifications = async () => {
+    try {
+      const res = await axios.get(
+        `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+      );
 
+      const notifications = (res.data || []).map(n => ({
+        ...n,
+        notificationId: n.notificationId || n.id
+      }));
 
-const fetchPostNotifications = async () => {
-  try {
-    const res = await axios.get(
-      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+      setPostNotifications(notifications);
+    } catch (err) {
+      console.error("Post notification fetch failed", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!adminId) return;
+
+    fetchPostNotifications();
+    const interval = setInterval(fetchPostNotifications, 5000);
+
+    return () => clearInterval(interval);
+  }, [adminId]);
+
+  const handleNotificationClick = async (notification) => {
+    // Mark as read in backend
+    await axios.post(
+      "http://127.0.0.1:5000/api/mark_post_notification_read",
+      { notificationId: notification.notificationId }
     );
 
-    const notifications = (res.data || []).map(n => ({
-      ...n,
-      notificationId: n.notificationId || n.id
-    }));
+    // Remove from UI
+    setPostNotifications(prev =>
+      prev.filter(n => n.notificationId !== notification.notificationId)
+    );
 
-    setPostNotifications(notifications);
-  } catch (err) {
-    console.error("Post notification fetch failed", err);
-  }
-};
+    setShowPostDropdown(false);
 
+    // Navigate to dashboard with postId
+    navigate("/dashboard", {
+      state: { postId: notification.postId }
+    });
+  };
 
-
-useEffect(() => {
-  if (!adminId) return;
-
-  fetchPostNotifications();
-  const interval = setInterval(fetchPostNotifications, 5000);
-
-  return () => clearInterval(interval);
-}, [adminId]);
-
-const handleNotificationClick = async (notification) => {
-  // Mark as read in backend
-  await axios.post(
-    "http://127.0.0.1:5000/api/mark_post_notification_read",
-    { notificationId: notification.notificationId }
-  );
-
-  // Remove from UI
-  setPostNotifications(prev =>
-    prev.filter(n => n.notificationId !== notification.notificationId)
-  );
-
-  setShowPostDropdown(false);
-
-  // Navigate to dashboard with postId
-  navigate("/dashboard", {
-    state: { postId: notification.postId }
-  });
-};
-
- const handleSendMessage = () => {
+  const handleSendMessage = () => {
     // now newMessageText is defined
     console.log("Sending message:", newMessageText);
     // your code to send the message
   };
 
-useEffect(() => {
-  const closeDropdown = (e) => {
-    if (
-      !e.target.closest(".icon-circle") &&
-      !e.target.closest(".notification-dropdown")
-    ) {
-      setShowPostDropdown(false);
-    }
-  };
+  useEffect(() => {
+    const closeDropdown = (e) => {
+      if (
+        !e.target.closest(".icon-circle") &&
+        !e.target.closest(".notification-dropdown")
+      ) {
+        setShowPostDropdown(false);
+      }
+    };
 
-  document.addEventListener("click", closeDropdown);
-  return () => document.removeEventListener("click", closeDropdown);
-}, []);
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
 
+  useEffect(() => {
+    const fetchStudents = async () => {
+      const querySnapshot = await getDocs(collection(db, "students"));
+      const studentsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setStudents(studentsData);
+    };
 
+    fetchStudents();
+  }, []);
 
-
-useEffect(() => {
-  const fetchStudents = async () => {
-    const querySnapshot = await getDocs(collection(db, "students"));
-    const studentsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setStudents(studentsData);
-  };
-
-  fetchStudents();
-}, []);
-
-
-const handleClick = () => {
+  const handleClick = () => {
     navigate("/all-chat"); // replace with your target route
   };
 
-useEffect(() => {
+  useEffect(() => {
     // Replace with your actual API call
     const fetchUnreadSenders = async () => {
       const response = await fetch("/api/unreadSenders");
@@ -155,129 +149,130 @@ useEffect(() => {
     fetchUnreadSenders();
   }, []);
 
-const handleSelectStudent = async (s) => {
-  setLoading(true);
-  try {
-    // 1️⃣ Fetch user info
-    const userRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`
-    );
-    const user = userRes.data || {};
+  const handleSelectStudent = async (s) => {
+    setLoading(true);
+    try {
+      // 1️⃣ Fetch user info
+      const userRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${s.userId}.json`
+      );
+      const user = userRes.data || {};
 
-    // 2️⃣ Fetch ClassMarks from Firebase
-    const marksRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`
-    );
-    const classMarks = marksRes.data || {};
+      // 2️⃣ Fetch ClassMarks from Firebase
+      const marksRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json`
+      );
+      const classMarks = marksRes.data || {};
 
-    const studentMarks = {};
-    const courseTeacherMap = {};
+      const studentMarksObj = {};
+      const courseTeacherMap = {};
 
-    // Loop through all courses
-    Object.entries(classMarks).forEach(([courseId, studentsObj]) => {
-      const studentMark = studentsObj?.[s.studentId];
-      if (studentMark) {
-        studentMarks[courseId] = {
-          mark20: Number(studentMark.mark20 || 0),
-          mark30: Number(studentMark.mark30 || 0),
-          mark50: Number(studentMark.mark50 || 0),
-          teacherName: studentMark.teacherName || "Teacher",
-        };
-        courseTeacherMap[courseId] = studentMark.teacherName || "Teacher";
-      }
-    });
+      // Loop through all courses
+      Object.entries(classMarks).forEach(([courseId, studentsObj]) => {
+        // There are two common ways to key student records under a course:
+        // 1) by the Students node key (student_123) -> that's stored in s.studentId
+        // 2) by a nested object where student objects might include userId properties
+        // We'll prefer matching by s.studentId (the RTDB Students key).
+        const studentMark =
+          studentsObj?.[s.studentId] ||
+          // fallback: try to find a student object whose userId matches s.userId
+          Object.values(studentsObj || {}).find(
+            (st) => st && (st.userId === s.userId || st.studentId === s.studentId)
+          );
 
-    // 3️⃣ Fetch Attendance (optional)
-    const attendanceRes = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`
-    );
-    const attendanceRaw = attendanceRes.data || {};
-
-    const attendanceData = [];
-    Object.entries(attendanceRaw).forEach(([courseId, datesObj]) => {
-      Object.entries(datesObj || {}).forEach(([date, studentsObj]) => {
-        const status = studentsObj?.[s.studentId];
-        if (status) {
-          attendanceData.push({
-            courseId,
-            date,
-            status,
-            teacherName: courseTeacherMap[courseId] || "Teacher",
-          });
+        if (studentMark) {
+          studentMarksObj[courseId] = studentMark;
+          courseTeacherMap[courseId] = studentMark.teacherName || "Teacher";
         }
       });
-    });
 
-    // 4️⃣ Set selected student state
-    setSelectedStudent({
-      ...s,
-      ...user,
-      marks: studentMarks,
-      attendance: attendanceData,
-    });
+      // 3️⃣ Fetch Attendance (optional)
+      const attendanceRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Attendance.json`
+      );
+      const attendanceRaw = attendanceRes.data || {};
 
-  } catch (err) {
-    console.error("Error fetching student data:", err);
-  }
-
-  setLoading(false);
-};
-
-
-
-
-
-useEffect(() => {
-  const fetchTeachersAndUnread = async () => {
-    try {
-      const [teachersRes, usersRes] = await Promise.all([
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json")
-      ]);
-
-      const teachersData = teachersRes.data || {};
-      const usersData = usersRes.data || {};
-
-      const teacherList = Object.keys(teachersData).map(tid => {
-        const teacher = teachersData[tid];
-        const user = usersData[teacher.userId] || {};
-        return {
-          teacherId: tid,
-          userId: teacher.userId,
-          name: user.name || "No Name",
-          profileImage: user.profileImage || "/default-profile.png"
-        };
+      const attendanceData = [];
+      Object.entries(attendanceRaw).forEach(([courseId, datesObj]) => {
+        Object.entries(datesObj || {}).forEach(([date, studentsObj]) => {
+          const status = studentsObj?.[s.studentId];
+          if (status) {
+            attendanceData.push({
+              courseId,
+              date,
+              status,
+              teacherName: courseTeacherMap[courseId] || "Teacher",
+            });
+          }
+        });
       });
 
-      setTeachers(teacherList);
-
-      // fetch unread messages
-      const unread = {};
-      const allMessages = [];
-
-      for (const t of teacherList) {
-        const chatKey = `${t.userId}_${adminUserId}`;
-        const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
-        const msgs = Object.values(res.data || {}).map(m => ({
-          ...m,
-          sender: m.senderId === adminUserId ? "admin" : "teacher"
-        }));
-        allMessages.push(...msgs);
-
-        const unreadCount = msgs.filter(m => m.receiverId === adminUserId && !m.seen).length;
-        if (unreadCount > 0) unread[t.userId] = unreadCount;
-      }
-
-      setPopupMessages(allMessages);
-      setUnreadTeachers(unread);
+      // 4️⃣ Set selected student state
+      setSelectedStudent({
+        ...s,
+        ...user,
+        marks: studentMarksObj,
+        attendance: attendanceData,
+      });
 
     } catch (err) {
-      console.error(err);
+      console.error("Error fetching student data:", err);
     }
+
+    setLoading(false);
   };
 
-  fetchTeachersAndUnread();
-}, [adminUserId]);
+  useEffect(() => {
+    const fetchTeachersAndUnread = async () => {
+      try {
+        const [teachersRes, usersRes] = await Promise.all([
+          axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"),
+          axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json")
+        ]);
+
+        const teachersData = teachersRes.data || {};
+        const usersData = usersRes.data || {};
+
+        const teacherList = Object.keys(teachersData).map(tid => {
+          const teacher = teachersData[tid];
+          const user = usersData[teacher.userId] || {};
+          return {
+            teacherId: tid,
+            userId: teacher.userId,
+            name: user.name || "No Name",
+            profileImage: user.profileImage || "/default-profile.png"
+          };
+        });
+
+        setTeachers(teacherList);
+
+        // fetch unread messages
+        const unread = {};
+        const allMessages = [];
+
+        for (const t of teacherList) {
+          const chatKey = `${t.userId}_${adminUserId}`;
+          const res = await axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`);
+          const msgs = Object.values(res.data || {}).map(m => ({
+            ...m,
+            sender: m.senderId === adminUserId ? "admin" : "teacher"
+          }));
+          allMessages.push(...msgs);
+
+          const unreadCount = msgs.filter(m => m.receiverId === adminUserId && !m.seen).length;
+          if (unreadCount > 0) unread[t.userId] = unreadCount;
+        }
+
+        setPopupMessages(allMessages);
+        setUnreadTeachers(unread);
+
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchTeachersAndUnread();
+  }, [adminUserId]);
 
   // ------------------ FETCH STUDENTS ------------------
   useEffect(() => {
@@ -292,16 +287,15 @@ useEffect(() => {
         const studentList = Object.keys(studentsData).map((id) => {
           const student = studentsData[id];
           const user = usersData[student.userId] || {};
-         return {
-  studentId: id,
-  userId: student.userId, // <-- Add this
-  name: user.name || user.username || "No Name",
-  profileImage: user.profileImage || "/default-profile.png",
-  grade: student.grade,
-  section: student.section,
-  email: user.email || ""
-};
-
+          return {
+            studentId: id,
+            userId: student.userId, // <-- Add this
+            name: user.name || user.username || "No Name",
+            profileImage: user.profileImage || "/default-profile.png",
+            grade: student.grade,
+            section: student.section,
+            email: user.email || ""
+          };
         });
 
         setStudents(studentList);
@@ -332,257 +326,263 @@ useEffect(() => {
   });
 
 
- // ---------------- FETCH PERFORMANCE ----------------
-useEffect(() => {
-  if (!selectedStudent?.studentId) return;
-
-  async function fetchMarks() {
-    try {
-      const res = await axios.get(
-        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json"
-      );
-
-      const marks = {};
-
-      Object.entries(res.data || {}).forEach(([courseId, students]) => {
-        if (students[selectedStudent.studentId]) {
-          marks[courseId] = students[selectedStudent.studentId];
-        }
-      });
-
-      setStudentMarks(marks);
-    } catch (err) {
-      console.error("Marks fetch error:", err);
-      setStudentMarks({});
-    }
-  }
-
-  fetchMarks();
-}, [selectedStudent]);
-
-
-
-//-------------------------Fetch unread status for each student--------------
-
+  // ---------------- FETCH PERFORMANCE ----------------
+  // This effect reads ClassMarks and stores only the entries for the selected student.
   useEffect(() => {
-  const fetchUnread = async () => {
-    const map = {};
-
-    for (const s of students) {
-      const key = `${s.studentId}_${admin.userId}`;
-
-      const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
-      );
-
-      const msgs = res.data || {};
-   map[s.studentId] = Object.values(msgs).some(
-  m => m.senderId === s.studentId && m.seenByAdmin === false
-);
-
+    if (!selectedStudent?.studentId) {
+      setStudentMarks({});
+      return;
     }
 
-    setUnreadMap(map);
-  };
+    let cancelled = false;
 
-  if (students.length > 0) fetchUnread();
-}, [students]);
+    async function fetchMarks() {
+      setLoading(true);
+      try {
+        const res = await axios.get(
+          "https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks.json"
+        );
 
-// ---------------- FETCH CHAT MESSAGES ----------------
- useEffect(() => {
-  if (!studentChatOpen || !selectedStudent) return;
+        const marksObj = {};
+        Object.entries(res.data || {}).forEach(([courseId, students]) => {
+          // Try direct key
+          if (students?.[selectedStudent.studentId]) {
+            marksObj[courseId] = students[selectedStudent.studentId];
+            return;
+          }
 
-  const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+          // Fallback: try to find by userId inside student nodes
+          const found = Object.values(students || {}).find(s => s && (s.userId === selectedStudent.userId || s.studentId === selectedStudent.studentId));
+          if (found) marksObj[courseId] = found;
+        });
 
-  const fetchMessages = async () => {
+        if (!cancelled) {
+          setStudentMarks(marksObj);
+        }
+      } catch (err) {
+        console.error("Marks fetch error:", err);
+        if (!cancelled) setStudentMarks({});
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchMarks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudent]);
+
+
+  //-------------------------Fetch unread status for each student--------------
+  useEffect(() => {
+    const fetchUnread = async () => {
+      const map = {};
+
+      for (const s of students) {
+        const key = `${s.studentId}_${admin.userId}`;
+
+        const res = await axios.get(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key}/messages.json`
+        );
+
+        const msgs = res.data || {};
+        map[s.studentId] = Object.values(msgs).some(
+          m => m.senderId === s.studentId && m.seenByAdmin === false
+        );
+
+      }
+
+      setUnreadMap(map);
+    };
+
+    if (students.length > 0) fetchUnread();
+  }, [students]);
+
+  // ---------------- FETCH CHAT MESSAGES ----------------
+  useEffect(() => {
+    if (!studentChatOpen || !selectedStudent) return;
+
+    const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+
+    const fetchMessages = async () => {
+      try {
+        const res = await axios.get(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+        );
+
+        const msgs = Object.values(res.data || {}).map(m => ({
+          ...m,
+          sender: m.senderId === adminUserId ? "admin" : "student"
+        })).sort((a, b) => a.timeStamp - b.timeStamp);
+
+        setPopupMessages(msgs);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchMessages();
+  }, [studentChatOpen, selectedStudent, adminUserId]);
+
+  // ---------------- SEND MESSAGE ----------------
+  const sendPopupMessage = async () => {
+    if (!popupInput.trim() || !selectedStudent) return;
+
+    const newMessage = {
+      senderId: adminUserId,
+      receiverId: selectedStudent.userId,
+      text: popupInput,
+      timeStamp: Date.now(),
+      seen: false
+    };
+
     try {
-      const res = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+      const chatKey = `${selectedStudent.userId}_${adminUserId}`;
+      await axios.post(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+        newMessage
       );
 
-      const msgs = Object.values(res.data || {}).map(m => ({
-        ...m,
-        sender: m.senderId === adminUserId ? "admin" : "student"
-      })).sort((a, b) => a.timeStamp - b.timeStamp);
-
-      setPopupMessages(msgs);
+      setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+      setPopupInput("");
     } catch (err) {
       console.error(err);
     }
   };
 
-  
+  // ---------------- FETCH UNREAD MESSAGES ----------------
+  const fetchUnreadMessages = async () => {
+    if (!admin.userId) return;
 
-  fetchMessages();
-}, [studentChatOpen, selectedStudent, adminUserId]);
+    const senders = {};
 
+    try {
+      // 1️⃣ USERS (names & images)
+      const usersRes = await axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+      );
+      const usersData = usersRes.data || {};
 
+      const findUserByUserId = (userId) => {
+        return Object.values(usersData).find(u => u.userId === userId);
+      };
 
+      // helper to read messages from BOTH chat keys
+      const getUnreadCount = async (userId) => {
+        const key1 = `${admin.userId}_${userId}`;
+        const key2 = `${userId}_${admin.userId}`;
 
+        const [r1, r2] = await Promise.all([
+          axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+          axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+        ]);
 
-  // ---------------- SEND MESSAGE ----------------
-const sendPopupMessage = async () => {
-  if (!popupInput.trim() || !selectedStudent) return;
+        const msgs = [
+          ...Object.values(r1.data || {}),
+          ...Object.values(r2.data || {})
+        ];
 
-  const newMessage = {
-    senderId: adminUserId,
-    receiverId: selectedStudent.userId,
-    text: popupInput,
-    timeStamp: Date.now(),
-    seen: false
+        return msgs.filter(
+          m => m.receiverId === admin.userId && !m.seen
+        ).length;
+      };
+
+      // 2️⃣ TEACHERS
+      const teachersRes = await axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
+      );
+
+      for (const k in teachersRes.data || {}) {
+        const t = teachersRes.data[k];
+        const unread = await getUnreadCount(t.userId);
+
+        if (unread > 0) {
+         const user = findUserByUserId(t.userId);
+
+        senders[t.userId] = {
+          type: "teacher",
+          name: user?.name || "Teacher",
+          profileImage: user?.profileImage || "/default-profile.png",
+          count: unread
+        };
+        }
+      }
+
+      // 3️⃣ STUDENTS
+      const studentsRes = await axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
+      );
+
+      for (const k in studentsRes.data || {}) {
+        const s = studentsRes.data[k];
+        const unread = await getUnreadCount(s.userId);
+
+        if (unread > 0) {
+          const user = findUserByUserId(s.userId);
+
+        senders[s.userId] = {
+          type: "student",
+          name: user?.name || s.name || "Student",
+          profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
+          count: unread
+        };
+
+        }
+      }
+
+      // 4️⃣ PARENTS
+      const parentsRes = await axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
+      );
+
+      for (const k in parentsRes.data || {}) {
+        const p = parentsRes.data[k];
+        const unread = await getUnreadCount(p.userId);
+
+        if (unread > 0) {
+         const user = findUserByUserId(p.userId);
+
+        senders[p.userId] = {
+          type: "parent",
+          name: user?.name || p.name || "Parent",
+          profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
+          count: unread
+        };
+
+        }
+      }
+
+      setUnreadSenders(senders);
+    } catch (err) {
+      console.error("Unread fetch failed:", err);
+    }
   };
-
-  try {
-    const chatKey = `${selectedStudent.userId}_${adminUserId}`;
-    await axios.post(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
-      newMessage
-    );
-
-    setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
-    setPopupInput("");
-  } catch (err) {
-    console.error(err);
-  }
-};
-
-
- // ---------------- FETCH UNREAD MESSAGES ----------------
-const fetchUnreadMessages = async () => {
-  if (!admin.userId) return;
-
-  const senders = {};
-
-  try {
-    // 1️⃣ USERS (names & images)
-    const usersRes = await axios.get(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
-    );
-    const usersData = usersRes.data || {};
-
- const findUserByUserId = (userId) => {
-  return Object.values(usersData).find(u => u.userId === userId);
-};
-
-
-
-    // helper to read messages from BOTH chat keys
-    const getUnreadCount = async (userId) => {
-      const key1 = `${admin.userId}_${userId}`;
-      const key2 = `${userId}_${admin.userId}`;
-
-      const [r1, r2] = await Promise.all([
-        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
-        axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
-      ]);
-
-      const msgs = [
-        ...Object.values(r1.data || {}),
-        ...Object.values(r2.data || {})
-      ];
-
-      return msgs.filter(
-        m => m.receiverId === admin.userId && !m.seen
-      ).length;
-    };
-
-    // 2️⃣ TEACHERS
-    const teachersRes = await axios.get(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
-    );
-
-    for (const k in teachersRes.data || {}) {
-      const t = teachersRes.data[k];
-      const unread = await getUnreadCount(t.userId);
-
-      if (unread > 0) {
-       const user = findUserByUserId(t.userId);
-
-senders[t.userId] = {
-  type: "teacher",
-  name: user?.name || "Teacher",
-  profileImage: user?.profileImage || "/default-profile.png",
-  count: unread
-};
-      }
-    }
-
-    // 3️⃣ STUDENTS
-    const studentsRes = await axios.get(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
-    );
-
-    for (const k in studentsRes.data || {}) {
-      const s = studentsRes.data[k];
-      const unread = await getUnreadCount(s.userId);
-
-      if (unread > 0) {
-        const user = findUserByUserId(s.userId);
-
-senders[s.userId] = {
-  type: "student",
-  name: user?.name || s.name || "Student",
-  profileImage: user?.profileImage || s.profileImage || "/default-profile.png",
-  count: unread
-};
-
-      }
-    }
-
-    // 4️⃣ PARENTS
-    const parentsRes = await axios.get(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Parents.json"
-    );
-
-    for (const k in parentsRes.data || {}) {
-      const p = parentsRes.data[k];
-      const unread = await getUnreadCount(p.userId);
-
-      if (unread > 0) {
-       const user = findUserByUserId(p.userId);
-
-senders[p.userId] = {
-  type: "parent",
-  name: user?.name || p.name || "Parent",
-  profileImage: user?.profileImage || p.profileImage || "/default-profile.png",
-  count: unread
-};
-
-      }
-    }
-
-    setUnreadSenders(senders);
-  } catch (err) {
-    console.error("Unread fetch failed:", err);
-  }
-};
 
   // ---------------- CLOSE DROPDOWN ON OUTSIDE CLICK ----------------
-useEffect(() => {
-  const closeDropdown = (e) => {
-    if (
-      !e.target.closest(".icon-circle") &&
-      !e.target.closest(".messenger-dropdown")
-    ) {
-      setShowMessageDropdown(false);
-    }
-  };
+  useEffect(() => {
+    const closeDropdown = (e) => {
+      if (
+        !e.target.closest(".icon-circle") &&
+        !e.target.closest(".messenger-dropdown")
+      ) {
+        setShowMessageDropdown(false);
+      }
+    };
 
-  document.addEventListener("click", closeDropdown);
-  return () => document.removeEventListener("click", closeDropdown);
-}, []);
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
 
+  useEffect(() => {
+    if (!admin.userId) return;
 
-useEffect(() => {
-  if (!admin.userId) return;
+    fetchUnreadMessages();
+    const interval = setInterval(fetchUnreadMessages, 5000);
 
-  fetchUnreadMessages();
-  const interval = setInterval(fetchUnreadMessages, 5000);
-
-  return () => clearInterval(interval);
-}, [admin.userId]);
-
-
+    return () => clearInterval(interval);
+  }, [admin.userId]);
 
   // ---------------- MARK MESSAGES AS SEEN ----------------
   useEffect(() => {
@@ -599,7 +599,7 @@ useEffect(() => {
         });
         if (Object.keys(updates).length > 0) {
           await axios.patch(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`, updates);
-          setUnreadStudents(prev => ({ ...prev, [selectedStudent.userId]: 0 }));
+          // setUnreadStudents(prev => ({ ...prev, [selectedStudent.userId]: 0 })); // keep if you use unreadStudents
         }
       } catch (err) {
         console.error(err);
@@ -608,116 +608,113 @@ useEffect(() => {
     markSeen();
   }, [studentChatOpen, selectedStudent, adminUserId]);
 
+  const attendanceStats = useMemo(() => {
+    if (!selectedStudent?.attendance) return null;
 
+    const total = selectedStudent.attendance.length;
+    const present = selectedStudent.attendance.filter(a => a.status === "present").length;
+    const absent = total - present;
+    const percent = total ? Math.round((present / total) * 100) : 0;
 
-const attendanceStats = useMemo(() => {
-  if (!selectedStudent?.attendance) return null;
+    // Consecutive absences
+    let streak = 0;
+    [...selectedStudent.attendance]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .some(a => {
+        if (a.status === "absent") {
+          streak++;
+          return false;
+        }
+        return true;
+      });
 
-  const total = selectedStudent.attendance.length;
-  const present = selectedStudent.attendance.filter(a => a.status === "present").length;
-  const absent = total - present;
-  const percent = total ? Math.round((present / total) * 100) : 0;
+    return { total, present, absent, percent, streak };
+  }, [selectedStudent]);
 
-  // Consecutive absences
-  let streak = 0;
-  [...selectedStudent.attendance]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .some(a => {
-      if (a.status === "absent") {
-        streak++;
-        return false;
-      }
-      return true;
-    });
+  const markMessagesAsSeen = async (userId) => {
+    const key1 = `${admin.userId}_${userId}`;
+    const key2 = `${userId}_${admin.userId}`;
 
-  return { total, present, absent, percent, streak };
-}, [selectedStudent]);
+    const [r1, r2] = await Promise.all([
+      axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
+      axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
+    ]);
 
+    const updates = {};
 
-const markMessagesAsSeen = async (userId) => {
-  const key1 = `${admin.userId}_${userId}`;
-  const key2 = `${userId}_${admin.userId}`;
+    const collectUpdates = (data, basePath) => {
+      Object.entries(data || {}).forEach(([msgId, msg]) => {
+        if (msg.receiverId === admin.userId && !msg.seen) {
+          updates[`${basePath}/${msgId}/seen`] = true;
+        }
+      });
+    };
 
-  const [r1, r2] = await Promise.all([
-    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key1}/messages.json`),
-    axios.get(`https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${key2}/messages.json`)
-  ]);
+    collectUpdates(r1.data, `Chats/${key1}/messages`);
+    collectUpdates(r2.data, `Chats/${key2}/messages`);
 
-  const updates = {};
-
-  const collectUpdates = (data, basePath) => {
-    Object.entries(data || {}).forEach(([msgId, msg]) => {
-      if (msg.receiverId === admin.userId && !msg.seen) {
-        updates[`${basePath}/${msgId}/seen`] = true;
-      }
-    });
+    if (Object.keys(updates).length > 0) {
+      await axios.patch(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
+        updates
+      );
+    }
   };
 
-  collectUpdates(r1.data, `Chats/${key1}/messages`);
-  collectUpdates(r2.data, `Chats/${key2}/messages`);
+  const attendanceData = React.useMemo(() => {
+    if (!selectedStudent?.attendance) return [];
 
-  if (Object.keys(updates).length > 0) {
-    await axios.patch(
-      "https://ethiostore-17d9f-default-rtdb.firebaseio.com/.json",
-      updates
-    );
-  }
-};
+    return selectedStudent.attendance.map(a => ({
+      date: a.date || a.created_at,
+      courseId: a.courseId || a.course || "Unknown Course",
+      teacherName: a.teacherName || a.teacher || "Unknown Teacher",
+      status: a.status || a.attendance_status || "absent"
+    }));
+  }, [selectedStudent]);
 
-const attendanceData = React.useMemo(() => {
-  if (!selectedStudent?.attendance) return [];
+  const groupedAttendance = React.useMemo(() => {
+    if (!attendanceData.length) return {};
 
-  return selectedStudent.attendance.map(a => ({
-    date: a.date || a.created_at,
-    courseId: a.courseId || a.course || "Unknown Course",
-    teacherName: a.teacherName || a.teacher || "Unknown Teacher",
-    status: a.status || a.attendance_status || "absent"
-  }));
-}, [selectedStudent]);
+    return attendanceData.reduce((acc, record) => {
+      const dateKey = new Date(record.date).toLocaleDateString();
 
-const groupedAttendance = React.useMemo(() => {
-  if (!attendanceData.length) return {};
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(record);
 
-  return attendanceData.reduce((acc, record) => {
-    const dateKey = new Date(record.date).toLocaleDateString();
+      return acc;
+    }, {});
+  }, [attendanceData]);
 
-    if (!acc[dateKey]) acc[dateKey] = [];
-    acc[dateKey].push(record);
 
+  const toggleExpand = (key) => {
+    setExpandedCards((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const getProgress = (records) => {
+    if (!records || !records.length) return 0;
+    const presentCount = records.filter(
+      (r) => r.status === "present" || r.status === "late"
+    ).length;
+    return Math.round((presentCount / records.length) * 100);
+  };
+
+  const attendanceBySubject = attendanceData.reduce((acc, cur) => {
+    if (!acc[cur.courseId]) acc[cur.courseId] = [];
+    acc[cur.courseId].push(cur);
     return acc;
   }, {});
-}, [attendanceData]);
 
+  const formatSubjectName = (courseId = "") => {
+    const clean = courseId
+      .replace("course_", "")
+      .replace(/_[0-9A-Za-z]+$/, "") // remove class like _9A
+      .replace(/_/g, " ");
 
-const toggleExpand = (key) => {
-  setExpandedCards((prev) => ({
-    ...prev,
-    [key]: !prev[key],
-  }));
-};
-
-const getProgress = (records) => {
-  if (!records || !records.length) return 0;
-  const presentCount = records.filter(
-    (r) => r.status === "present" || r.status === "late"
-  ).length;
-  return Math.round((presentCount / records.length) * 100);
-};
-
-const attendanceBySubject = attendanceData.reduce((acc, cur) => {
-  if (!acc[cur.courseId]) acc[cur.courseId] = [];
-  acc[cur.courseId].push(cur);
-  return acc;
-}, {});
-
-const formatSubjectName = (courseId = "") => {
-  const clean = courseId
-    .replace("course_", "")
-    .replace(/_[0-9A-Za-z]+$/, "") // remove class like _9A
-    .replace(/_/g, " ");
-
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
-};
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  };
 
 
   return (
@@ -732,88 +729,88 @@ const formatSubjectName = (courseId = "") => {
         </div>
         <div className="nav-right">
           <div
-  className="icon-circle"
-  style={{ position: "relative", cursor: "pointer" }}
-  onClick={(e) => {
-    e.stopPropagation();
-    setShowPostDropdown(prev => !prev);
-  }}
->
-  <FaBell />
-
-  {/* 🔴 Notification Count */}
-  {postNotifications.length > 0 && (
-    <span
-      style={{
-        position: "absolute",
-        top: "-5px",
-        right: "-5px",
-        background: "red",
-        color: "#fff",
-        borderRadius: "50%",
-        padding: "2px 6px",
-        fontSize: "10px",
-        fontWeight: "bold"
-      }}
-    >
-      {postNotifications.length}
-    </span>
-  )}
-
-  {/* 🔔 Notification Dropdown */}
-  {showPostDropdown && (
-    <div
-      className="notification-dropdown"
-      style={{
-        position: "absolute",
-        top: "40px",
-        right: "0",
-        width: "350px",
-        maxHeight: "400px",
-        overflowY: "auto",
-        background: "#fff",
-        borderRadius: "10px",
-        boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
-        zIndex: 1000
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {postNotifications.length === 0 ? (
-        <p style={{ padding: "12px", textAlign: "center" }}>
-          No new notifications
-        </p>
-      ) : (
-        postNotifications.map(n => (
-          <div
-            key={n.notificationId}
-            style={{
-              display: "flex",
-              gap: "10px",
-              padding: "10px",
-              cursor: "pointer",
-              borderBottom: "1px solid #eee"
+            className="icon-circle"
+            style={{ position: "relative", cursor: "pointer" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPostDropdown(prev => !prev);
             }}
-            onClick={() => handleNotificationClick(n)}
           >
-            <img
-              src={n.adminProfile || "/default-profile.png"}
-              alt={n.adminName}
-              style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "50%"
-              }}
-            />
-            <div>
-              <strong>{n.adminName}</strong>
-              <p style={{ margin: 0 }}>{n.message}</p>
-            </div>
+            <FaBell />
+
+            {/* 🔴 Notification Count */}
+            {postNotifications.length > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-5px",
+                  right: "-5px",
+                  background: "red",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  padding: "2px 6px",
+                  fontSize: "10px",
+                  fontWeight: "bold"
+                }}
+              >
+                {postNotifications.length}
+              </span>
+            )}
+
+            {/* 🔔 Notification Dropdown */}
+            {showPostDropdown && (
+              <div
+                className="notification-dropdown"
+                style={{
+                  position: "absolute",
+                  top: "40px",
+                  right: "0",
+                  width: "350px",
+                  maxHeight: "400px",
+                  overflowY: "auto",
+                  background: "#fff",
+                  borderRadius: "10px",
+                  boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
+                  zIndex: 1000
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {postNotifications.length === 0 ? (
+                  <p style={{ padding: "12px", textAlign: "center" }}>
+                    No new notifications
+                  </p>
+                ) : (
+                  postNotifications.map(n => (
+                    <div
+                      key={n.notificationId}
+                      style={{
+                        display: "flex",
+                        gap: "10px",
+                        padding: "10px",
+                        cursor: "pointer",
+                        borderBottom: "1px solid #eee"
+                      }}
+                      onClick={() => handleNotificationClick(n)}
+                    >
+                      <img
+                        src={n.adminProfile || "/default-profile.png"}
+                        alt={n.adminName}
+                        style={{
+                          width: "40px",
+                          height: "40px",
+                          borderRadius: "50%"
+                        }}
+                      />
+                      <div>
+                        <strong>{n.adminName}</strong>
+                        <p style={{ margin: 0 }}>{n.message}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
-        ))
-      )}
-    </div>
-  )}
-</div>
 
     {/* ================= MESSENGER ================= */}
     <div
@@ -1519,6 +1516,38 @@ const formatSubjectName = (courseId = "") => {
             {/* PERFORMANCE TAB */}
    {studentTab === "performance" && (
   <div style={{ position: "relative", paddingBottom: "70px", background: "#f8fafc" }}>
+    {/* Semester Tabs */}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "center",
+        gap: "24px",
+        marginBottom: "18px",
+        paddingTop: "12px"
+      }}
+    >
+      {["semester1", "semester2"].map((sem) => {
+        const active = activeSemester === sem;
+        return (
+          <button
+            key={sem}
+            onClick={() => setActiveSemester(sem)}
+            style={{
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              fontWeight: 800,
+              color: active ? "#2563eb" : "#64748b",
+              padding: "8px 12px",
+              borderBottom: active ? "3px solid #2563eb" : "3px solid transparent"
+            }}
+          >
+            {sem === "semester1" ? "Semester 1" : "Semester 2"}
+          </button>
+        );
+      })}
+    </div>
+
     <div
       style={{
         display: "grid",
@@ -1527,7 +1556,11 @@ const formatSubjectName = (courseId = "") => {
         padding: "20px",
       }}
     >
-      {Object.keys(studentMarks).length === 0 ? (
+      {loading ? (
+        <div style={{ textAlign: "center", gridColumn: "1 / -1", padding: "30px" }}>
+          Loading performance...
+        </div>
+      ) : Object.keys(studentMarks).length === 0 ? (
         <div
           style={{
             textAlign: "center",
@@ -1538,15 +1571,22 @@ const formatSubjectName = (courseId = "") => {
             fontSize: "16px",
             fontWeight: "600",
             boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+            gridColumn: "1 / -1",
           }}
         >
           🚫 No Performance Records
         </div>
       ) : (
-        Object.entries(studentMarks).map(([courseId, marks], idx) => {
-          const assessments = marks.assessments || {};
-          const total = Object.values(assessments).reduce((sum, a) => sum + (a.score || 0), 0);
-          const maxTotal = Object.values(assessments).reduce((sum, a) => sum + (a.max || 0), 0);
+        Object.entries(studentMarks).map(([courseId, studentCourseData], idx) => {
+          // studentCourseData should match the structure:
+          // { teacherName: "...", semester1: { assessments: {...} }, semester2: { assessments: {...} } }
+          const semesterData = studentCourseData?.[activeSemester] || {};
+          const assessments = semesterData.assessments || {};
+          // assessments is an object like { a1: {name, score, max}, a2: {...} }
+          const assessmentList = Object.values(assessments || {});
+
+          const total = assessmentList.reduce((sum, a) => sum + (Number(a.score) || 0), 0);
+          const maxTotal = assessmentList.reduce((sum, a) => sum + (Number(a.max) || 0), 0);
           const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
 
           const statusColor =
@@ -1556,9 +1596,11 @@ const formatSubjectName = (courseId = "") => {
               ? "#f59e0b"
               : "#dc2626";
 
+          const courseName = courseId.replace("course_", "").replace(/_/g, " ");
+
           return (
             <div
-              key={idx}
+              key={`${courseId}-${idx}`}
               style={{
                 padding: "18px",
                 borderRadius: "20px",
@@ -1577,7 +1619,7 @@ const formatSubjectName = (courseId = "") => {
                   color: "#2563eb",
                 }}
               >
-                {courseId.replace("course_", "").replace(/_/g, " ")}
+                {courseName}
               </div>
 
               {/* Score Circle */}
@@ -1616,46 +1658,50 @@ const formatSubjectName = (courseId = "") => {
               </div>
 
               {/* Marks Bars */}
-              {Object.entries(assessments).map(([key, a]) => (
-                <div key={key} style={{ marginBottom: "10px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      color: "#334155",
-                    }}
-                  >
-                    <span>{a.name}</span>
-                    <span>
-                      {a.score} / {a.max}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      height: "6px",
-                      borderRadius: "999px",
-                      background: "#e5e7eb",
-                      marginTop: "5px",
-                      overflow: "hidden",
-                    }}
-                  >
+              {assessmentList.length === 0 ? (
+                <div style={{ textAlign: "center", color: "#94a3b8" }}>No assessments for {activeSemester}</div>
+              ) : (
+                assessmentList.map((a, i) => (
+                  <div key={i} style={{ marginBottom: "10px" }}>
                     <div
                       style={{
-                        width: `${(a.score / a.max) * 100}%`,
-                        height: "100%",
-                        background:
-                          a.max >= 50
-                            ? "#ea580c"
-                            : a.max >= 30
-                            ? "#16a34a"
-                            : "#2563eb",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: "13px",
+                        fontWeight: "600",
+                        color: "#334155",
                       }}
-                    />
+                    >
+                      <span>{a.name}</span>
+                      <span>
+                        {Number(a.score) || 0} / {Number(a.max) || 0}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: "6px",
+                        borderRadius: "999px",
+                        background: "#e5e7eb",
+                        marginTop: "5px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${((Number(a.score) || 0) / (Number(a.max) || 1)) * 100}%`,
+                          height: "100%",
+                          background:
+                            a.max >= 50
+                              ? "#ea580c"
+                              : a.max >= 30
+                              ? "#16a34a"
+                              : "#2563eb",
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
 
               {/* Status */}
               <div
@@ -1683,7 +1729,7 @@ const formatSubjectName = (courseId = "") => {
                   color: "#64748b",
                 }}
               >
-                👨‍🏫 {marks.teacherName}
+                👨‍🏫 {studentCourseData.teacherName || semesterData.teacherName || "N/A"}
               </div>
             </div>
           );
@@ -1806,11 +1852,11 @@ const formatSubjectName = (courseId = "") => {
         type="text"
         value={popupInput}
         onChange={e => setPopupInput(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && handleSendMessage()}
+        onKeyDown={e => e.key === "Enter" && sendPopupMessage()}
         placeholder="Type a message..."
         style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }}
       />
-      <button onClick={() => sendPopupMessage(newMessageText)} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
+      <button onClick={() => sendPopupMessage()} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
     </div>
   </div>
 )}

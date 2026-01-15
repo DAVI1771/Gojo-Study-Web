@@ -218,6 +218,50 @@ useEffect(() => {
     fetchUnreadSenders();
   }, []);
 
+
+// helper: canonical chat key (sorted so it's consistent)
+const getChatKey = (userA, userB) => {
+  // ensure stable ordering: "lower_higher"
+  return [userA, userB].sort().join("_");
+};
+
+// FETCH CHAT MESSAGES for popup (replace your existing effect)
+useEffect(() => {
+  if (!teacherChatOpen || !selectedTeacher) return;
+
+  const fetchMessages = async () => {
+    try {
+      const chatKey = getChatKey(selectedTeacher.userId, adminUserId);
+
+      // read messages node
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/messages.json`
+      );
+
+      const data = res.data || {};
+      // transform object -> array with messageId and sender role
+      const msgs = Object.entries(data || {})
+        .map(([id, msg]) => ({
+          messageId: id,
+          ...msg,
+          sender: msg.senderId === adminUserId ? "admin" : "teacher",
+        }))
+        .sort((a, b) => (a.timeStamp || 0) - (b.timeStamp || 0));
+
+      setPopupMessages(msgs);
+    } catch (err) {
+      console.error("Failed to fetch chat messages:", err);
+      setPopupMessages([]);
+    }
+  };
+
+  fetchMessages();
+
+  // optional: poll for new messages while popup is open
+  const interval = setInterval(fetchMessages, 3000);
+  return () => clearInterval(interval);
+}, [teacherChatOpen, selectedTeacher, adminUserId]);
+
 //----------------------Fetch unread messages for teachers--------------------
 
       useEffect(() => {
@@ -283,6 +327,9 @@ useEffect(() => {
 const sendPopupMessage = async () => {
   if (!popupInput.trim() || !selectedTeacher) return;
 
+  const chatKey = getChatKey(selectedTeacher.userId, adminUserId);
+  const timestamp = Date.now();
+
   const newMessage = {
     senderId: adminUserId,
     receiverId: selectedTeacher.userId,
@@ -293,21 +340,66 @@ const sendPopupMessage = async () => {
     seen: false,
     edited: false,
     deleted: false,
-    timeStamp: Date.now()
+    timeStamp: timestamp
   };
 
-  const chatKey = getChatKey(selectedTeacher.userId, adminUserId);
-
   try {
-    await axios.post(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+    // 1) Push message to messages node (POST -> returns a name/key)
+    const pushRes = await axios.post(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/messages.json`,
       newMessage
     );
+    const generatedId = pushRes.data && pushRes.data.name;
 
-    setPopupMessages(prev => [...prev, { ...newMessage, sender: "admin" }]);
+    // 2) Update lastMessage (so UI can show previews)
+    const lastMessage = {
+      text: newMessage.text,
+      senderId: newMessage.senderId,
+      seen: false,
+      timeStamp: newMessage.timeStamp
+    };
+
+    await axios.patch(
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}.json`,
+      {
+        lastMessage,
+        // ensure participants entry exists
+        participants: {
+          ...(/* keep existing participants if any */ {}),
+          [adminUserId]: true,
+          [selectedTeacher.userId]: true
+        }
+      }
+    );
+
+    // 3) Increment unread count for receiver (non-atomic: read -> increment -> write)
+    try {
+      const unreadRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/unread.json`
+      );
+      const unread = unreadRes.data || {};
+      const prev = Number(unread[selectedTeacher.userId] || 0);
+      const updated = { ...(unread || {}), [selectedTeacher.userId]: prev + 1 };
+      await axios.put(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/unread.json`,
+        updated
+      );
+    } catch (uErr) {
+      // if unread node missing or failed, set it
+      await axios.put(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/unread.json`,
+        { [selectedTeacher.userId]: 1, [adminUserId]: 0 }
+      );
+    }
+
+    // 4) Optimistically update UI
+    setPopupMessages(prev => [
+      ...prev,
+      { messageId: generatedId || `${timestamp}`, ...newMessage, sender: "admin" }
+    ]);
     setPopupInput("");
   } catch (err) {
-    console.error(err);
+    console.error("Failed to send message:", err);
   }
 };
 
@@ -315,25 +407,45 @@ const markMessagesAsSeen = async (userId) => {
   const chatKey = getChatKey(userId, adminUserId);
 
   try {
+    // read messages
     const res = await axios.get(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`
+      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/messages.json`
     );
+    const data = res.data || {};
 
+    // build updates to set seen=true for messages where receiverId === adminUserId and seen is false
     const updates = {};
-    Object.entries(res.data || {}).forEach(([msgId, msg]) => {
+    Object.entries(data).forEach(([msgId, msg]) => {
       if (msg.receiverId === adminUserId && !msg.seen) {
-        updates[`${msgId}/seen`] = true;
+        updates[`messages/${msgId}/seen`] = true;
       }
     });
 
+    // apply updates (PATCH at chat root)
     if (Object.keys(updates).length > 0) {
       await axios.patch(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${chatKey}/messages.json`,
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}.json`,
         updates
       );
     }
+
+    // reset unread counter for adminUserId
+    try {
+      const unreadRes = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/unread.json`
+      );
+      const unread = unreadRes.data || {};
+      // set admin unread to 0
+      const updated = { ...(unread || {}), [adminUserId]: 0 };
+      await axios.put(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Chats/${encodeURIComponent(chatKey)}/unread.json`,
+        updated
+      );
+    } catch (uErr) {
+      // ignore
+    }
   } catch (err) {
-    console.error(err);
+    console.error("markMessagesAsSeen error:", err);
   }
 };
 

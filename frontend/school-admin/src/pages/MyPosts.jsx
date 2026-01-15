@@ -34,7 +34,7 @@ function MyPosts() {
   // loading states for edit/delete
   const [savingId, setSavingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-
+  const { posterName, posterProfile } = location.state || {};
   const navigate = useNavigate();
 
   // Read admin from localStorage
@@ -44,6 +44,8 @@ function MyPosts() {
   } catch (e) {
     admin = {};
   }
+  // adminId used across this component references the userId from Users node (as in your original code),
+  // if your posts use different admin identifier (e.g. "admin_001") then adjust accordingly.
   const adminId = admin?.userId || null;
 
   // Extract token if present in admin object (common field names)
@@ -70,18 +72,71 @@ function MyPosts() {
 
   console.log("AdminId used for fetch:", adminId);
 
+  const RTDB_BASE = "https://ethiostore-17d9f-default-rtdb.firebaseio.com";
+
   // ---------------- FETCH POST NOTIFICATIONS ----------------
+  // Updated to enrich each notification with the poster's name and profile image
   const fetchPostNotifications = async () => {
     if (!adminId) return;
     try {
       const res = await axios.get(
         `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
       );
-      const notifications = (res.data || []).map((n, index) => ({
+      const rawNotifications = (res.data || []).map((n, index) => ({
         ...n,
         notificationId: n.notificationId || n.id || `notification-${index}-${Date.now()}`,
       }));
-      setPostNotifications(notifications);
+
+      // If the notification already contains adminName/adminProfile, keep them.
+      // Otherwise, try to resolve the poster's user profile from RTDB:
+      // - If notification has userId -> Users/<userId>
+      // - If notification has adminId (e.g. "admin_001") -> School_Admins/<adminId>.userId -> Users/<userId>
+      // We'll fetch Users and School_Admins once to avoid many requests.
+      const [usersRes, adminsRes] = await Promise.allSettled([
+        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"),
+        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins.json"),
+      ]);
+
+      const usersData = usersRes.status === "fulfilled" ? usersRes.value.data || {} : {};
+      const adminsData = adminsRes.status === "fulfilled" ? adminsRes.value.data || {} : {};
+
+      const enriched = rawNotifications.map((n) => {
+        // prefer existing fields if provided by API
+        if (n.adminName && n.adminProfile) return n;
+
+        // determine candidate userId
+        let posterUserId = n.userId || n.posterUserId || null;
+
+        // if notification gives adminId (like "admin_001"), map to Users via School_Admins
+        if (!posterUserId && n.adminId) {
+          const adminEntry = adminsData[n.adminId];
+          if (adminEntry && adminEntry.userId) posterUserId = adminEntry.userId;
+        }
+
+        // Look up user object in Users
+        let userObj = null;
+        if (posterUserId) {
+          // Users in your RTDB may be keyed by their firebase key; find by matching user.userId === posterUserId
+          // but many datasets store the user under the key that is the userId; support both:
+          userObj = usersData[posterUserId] || Object.values(usersData).find(u => u?.userId === posterUserId) || null;
+        }
+
+        // Fallback: if notification contains adminName/adminProfile fields use them
+        const adminName = n.adminName || userObj?.name || userObj?.username || "Admin";
+        const adminProfile =
+          n.adminProfile ||
+          userObj?.profileImage ||
+          userObj?.profileImg ||
+          "/default-profile.png";
+
+        return {
+          ...n,
+          adminName,
+          adminProfile,
+        };
+      });
+
+      setPostNotifications(enriched);
     } catch (err) {
       console.error("Post notification fetch failed", err.response?.data || err);
     }
@@ -127,14 +182,16 @@ function MyPosts() {
       const mappedPosts = postsArray
         .map((p) => {
           const parsedTime = p.time ? new Date(p.time) : new Date();
+          // prefer a real postId field, fallback to key-like value
+          const postId = p.postId || p.postId === "" ? p.postId : p.id || p.postId || "";
           return {
-            postId: p.postId || p.id || String(p?.postId || ""),
+            postId: postId || String(p?.postId || p?.id || ""),
             message: p.message || p.postText || "",
-            postUrl: p.postUrl || p.mediaUrl || null,
+            postUrl: p.postUrl || p.mediaUrl || p.postUrl || null,
             time: parsedTime.toLocaleString(),
             parsedTime,
             edited: p.edited || false,
-            likeCount: p.likeCount || 0,
+            likeCount: Number(p.likeCount) || 0,
             likes: p.likes || {},
             adminId: p.adminId || adminId,
           };
@@ -180,7 +237,7 @@ function MyPosts() {
     }
   };
 
-  // ---------------- EDIT POST ----------------
+  // ---------------- EDIT POST (fixed to update Firebase directly with fallback) ----------------
   const handleEdit = (postId, currentContent) => {
     setEditingPostId(postId);
     setEditedContent(currentContent || "");
@@ -201,31 +258,47 @@ function MyPosts() {
 
     setSavingId(postId);
 
-    const url = `http://127.0.0.1:5000/api/edit_post/${postId}`;
-    const payload = { adminId, postText: trimmed, message: trimmed };
+    // First try to update directly in Firebase RTDB (Posts/<postId>)
+    try {
+      const payload = {
+        message: trimmed,
+        edited: true,
+        editedAt: new Date().toISOString(),
+        lastEditedBy: adminId,
+      };
 
-    // Prefer Authorization header if token exists
-    const headers = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-      headers["x-access-token"] = token;
+      const firebaseUrl = `${RTDB_BASE}/Posts/${encodeURIComponent(postId)}.json`;
+      const res = await axios.patch(firebaseUrl, payload);
+      // If successful, update local UI
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.postId === postId ? { ...post, message: trimmed, edited: true } : post
+        )
+      );
+      setEditingPostId(null);
+      setEditedContent("");
+      console.log("[EDIT] Firebase patch success:", res.status);
+      return;
+    } catch (err) {
+      console.warn("[EDIT] Firebase patch failed, falling back to backend API:", err.response?.data || err.message || err);
+      // fallback to backend endpoint (kept for compatibility)
     }
 
+    // Fallback: try existing backend endpoint
     try {
-      console.log("[EDIT] URL:", url);
-      console.log("[EDIT] Payload:", payload);
-      console.log("[EDIT] Headers:", headers);
+      const url = `http://127.0.0.1:5000/api/edit_post/${postId}`;
+      const payload = { adminId, postText: trimmed, message: trimmed };
+      const headers = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+        headers["x-access-token"] = token;
+      }
 
-      // Backend in your logs expected POST with auth — try POST
       const res = await axios.post(url, payload, { headers });
-      console.log("[EDIT] Response:", res.status, res.data);
-
-      // If backend returns success:false, throw to be caught below
       if (res.data && res.data.success === false) {
         throw new Error(res.data.message || "Edit failed on backend");
       }
 
-      // Update UI optimistically
       setPosts((prev) =>
         prev.map((post) =>
           post.postId === postId ? { ...post, message: trimmed, edited: true } : post
@@ -234,16 +307,9 @@ function MyPosts() {
 
       setEditingPostId(null);
       setEditedContent("");
-      console.log("[EDIT] Success for postId:", postId);
+      console.log("[EDIT] Backend edit success for postId:", postId);
     } catch (err) {
-      // Provide enough info for debugging
-      console.error(
-        "[EDIT] Error:",
-        err.response?.status,
-        err.response?.data || err.message || err
-      );
-
-      // If 403, likely auth token missing/invalid
+      console.error("[EDIT] Final error:", err.response?.status, err.response?.data || err.message || err);
       if (err.response?.status === 403) {
         alert("Edit forbidden (403). Check authentication token. See console for details.");
       } else {
@@ -254,7 +320,7 @@ function MyPosts() {
     }
   };
 
-  // ---------------- DELETE POST ----------------
+  // ---------------- DELETE POST (fixed to remove from Firebase with fallback) ----------------
   const handleDelete = async (postId) => {
     if (!postId) {
       console.error("postId missing");
@@ -268,55 +334,63 @@ function MyPosts() {
 
     setDeletingId(postId);
 
-    const url = `http://127.0.0.1:5000/api/delete_post/${postId}`;
-    const headers = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-      headers["x-access-token"] = token;
+    // Try to delete from Firebase RTDB directly
+    try {
+      const firebaseUrl = `${RTDB_BASE}/Posts/${encodeURIComponent(postId)}.json`;
+      const res = await axios.delete(firebaseUrl);
+      // On success remove from UI
+      setPosts((prev) => prev.filter((p) => p.postId !== postId));
+      console.log("[DELETE] Firebase delete success:", res.status);
+      setDeletingId(null);
+      return;
+    } catch (err) {
+      console.warn("[DELETE] Firebase delete failed, falling back to backend API:", err.response?.data || err.message || err);
+      // fallback below
     }
 
+    // Fallback: try backend endpoints with multiple strategies (as before)
     try {
-      console.log("[DELETE] URL:", url, "adminId:", adminId);
-      console.log("[DELETE] Headers:", headers);
+      const url = `http://127.0.0.1:5000/api/delete_post/${postId}`;
+      const headers = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+        headers["x-access-token"] = token;
+      }
 
-      // Many backends use POST for "soft" delete endpoints — try POST first
+      console.log("[DELETE] Trying backend POST", url);
       try {
         const rPost = await axios.post(url, { adminId }, { headers });
-        console.log("[DELETE] POST response:", rPost.status, rPost.data);
         if (rPost.data && rPost.data.success === false) {
           throw new Error(rPost.data.message || "delete returned success:false");
         }
+        setPosts((prev) => prev.filter((p) => p.postId !== postId));
+        console.log("[DELETE] Backend POST delete success");
+        setDeletingId(null);
+        return;
       } catch (postErr) {
-        console.warn(
-          "[DELETE] POST failed or not supported:",
-          postErr.response?.status,
-          postErr.response?.data || postErr.message
-        );
-
-        // Try DELETE with body (axios uses { data: ... })
-        try {
-          const rDelBody = await axios.delete(url, { data: { adminId }, headers });
-          console.log("[DELETE] DELETE(body) response:", rDelBody.status, rDelBody.data);
-          if (rDelBody.data && rDelBody.data.success === false)
-            throw new Error(rDelBody.data.message || "delete returned success:false");
-        } catch (delBodyErr) {
-          console.warn(
-            "[DELETE] DELETE(body) failed:",
-            delBodyErr.response?.status,
-            delBodyErr.response?.data || delBodyErr.message
-          );
-
-          // Final fallback: DELETE with query param
-          const rDelParam = await axios.delete(url, { params: { adminId }, headers });
-          console.log("[DELETE] DELETE(params) response:", rDelParam.status, rDelParam.data);
-          if (rDelParam.data && rDelParam.data.success === false)
-            throw new Error(rDelParam.data.message || "delete returned success:false");
-        }
+        console.warn("[DELETE] Backend POST failed, trying DELETE with body:", postErr.response?.data || postErr.message || postErr);
       }
 
-      // Remove from UI on success
+      // DELETE with body
+      try {
+        const rDelBody = await axios.delete(url, { data: { adminId }, headers });
+        if (rDelBody.data && rDelBody.data.success === false)
+          throw new Error(rDelBody.data.message || "delete returned success:false");
+        setPosts((prev) => prev.filter((p) => p.postId !== postId));
+        console.log("[DELETE] Backend DELETE(body) success");
+        setDeletingId(null);
+        return;
+      } catch (delBodyErr) {
+        console.warn("[DELETE] Backend DELETE(body) failed, trying DELETE with params:", delBodyErr.response?.data || delBodyErr.message || delBodyErr);
+      }
+
+      // DELETE with query param
+      const rDelParam = await axios.delete(url, { params: { adminId }, headers });
+      if (rDelParam.data && rDelParam.data.success === false)
+        throw new Error(rDelParam.data.message || "delete returned success:false");
+
       setPosts((prev) => prev.filter((p) => p.postId !== postId));
-      console.log("[DELETE] Success, removed postId:", postId);
+      console.log("[DELETE] Backend DELETE(params) success");
     } catch (err) {
       console.error("[DELETE] Final error:", err.response?.status, err.response?.data || err.message || err);
       if (err.response?.status === 403) {
@@ -561,11 +635,7 @@ function MyPosts() {
       <nav className="top-navbar">
         <h2>Gojo Dashboard</h2>
 
-        <div className="nav-search">
-          <FaSearch className="search-icon" />
-          <input type="text" placeholder="Search Teacher and Student..." />
-        </div>
-
+       
         <div className="nav-right">
           <div
             className="icon-circle"
@@ -627,15 +697,28 @@ function MyPosts() {
                         borderBottom: "1px solid #eee",
                       }}
                       onClick={async () => {
-                        await axios.post("http://127.0.0.1:5000/api/mark_post_notification_read", {
-                          notificationId: n.notificationId,
-                        });
-                        setPostNotifications((prev) =>
-                          prev.filter((notif) => notif.notificationId !== n.notificationId)
-                        );
-                        setShowPostDropdown(false);
-                        navigate("/dashboard", { state: { postId: n.postId } });
-                      }}
+  await axios.post("http://127.0.0.1:5000/api/mark_post_notification_read", {
+    notificationId: n.notificationId,
+  });
+
+  setPostNotifications((prev) =>
+    prev.filter((notif) => notif.notificationId !== n.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // Pass poster info to the dashboard so the dashboard (or the target route)
+  // can display the post author's name/profile if you want.
+  navigate("/dashboard", {
+    state: {
+      postId: n.postId,
+      posterName: n.adminName || n.posterName || null,
+      posterProfile: n.adminProfile || n.posterProfile || null,
+      posterAdminId: n.posterAdminId || n.adminId || null,
+      posterUserId: n.posterUserId || null,
+    },
+  });
+}}
                     >
                       <img
                         src={n.adminProfile || "/default-profile.png"}
@@ -796,23 +879,7 @@ function MyPosts() {
         </div>
 
         <div className="google-main">
-          <div className="post-box">
-            <div className="fb-post-top">
-              <img src={admin.profileImage || "/default-profile.png"} alt="me" />
-              <textarea placeholder="What's on your mind?" value={postText} onChange={(e) => setPostText(e.target.value)} />
-              <div className="fb-post-bottom">
-                <label className="fb-upload">
-                  <AiFillPicture className="fb-icon" />
-                  <input type="file" onChange={(e) => setPostMedia(e.target.files[0])} accept="image/*,video/*" />
-                </label>
-                <button className="telegram-send-icon" onClick={handlePost}>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25" width="35" height="35" fill="#0088cc">
-                    <path d="M2.01 21L23 12 2.01 3v7l15 2-15 2z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
+          <h2 style={{ textAlign: "center", marginBottom: "20px" }}>My Posts</h2>
 
           {posts.length === 0 && <p style={{ fontSize: "16px", textAlign: "center" }}>You have no posts yet.</p>}
 

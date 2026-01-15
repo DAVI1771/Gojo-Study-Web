@@ -434,9 +434,7 @@ const handleNotificationClick = (postId, index) => {
                     >
                       <FaHome /> Home
                     </Link>
-                    <Link className="sidebar-btn" to="/notes">
-                      <FaClipboardCheck /> Notes
-                    </Link>
+                   
                     <Link className="sidebar-btn" to="/students">
                       <FaUsers /> Students
                     </Link>
