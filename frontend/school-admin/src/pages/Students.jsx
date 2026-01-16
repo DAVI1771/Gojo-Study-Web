@@ -59,22 +59,71 @@ function StudentsPage() {
 
   const db = getDatabase(app);
 
-  const fetchPostNotifications = async () => {
-    try {
-      const res = await axios.get(
-        `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
-      );
+const fetchPostNotifications = async () => {
+  if (!adminId) return;
 
-      const notifications = (res.data || []).map(n => ({
-        ...n,
-        notificationId: n.notificationId || n.id
-      }));
+  try {
+    // 1️⃣ Get post notifications
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
 
-      setPostNotifications(notifications);
-    } catch (err) {
-      console.error("Post notification fetch failed", err);
+    let notifications = Array.isArray(res.data)
+      ? res.data
+      : Object.values(res.data || {});
+
+    if (notifications.length === 0) {
+      setPostNotifications([]);
+      return;
     }
-  };
+
+    // 2️⃣ Fetch Users & School_Admins
+    const [usersRes, adminsRes] = await Promise.all([
+      axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+      ),
+      axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins.json"
+      ),
+    ]);
+
+    const users = usersRes.data || {};
+    const admins = adminsRes.data || {};
+
+    // 3️⃣ Helpers
+    const findAdminUser = (adminId) => {
+      const admin = admins[adminId];
+      if (!admin) return null;
+
+      return Object.values(users).find(
+        (u) => u.userId === admin.userId
+      );
+    };
+
+    // 4️⃣ Enrich notifications
+    const enriched = notifications.map((n) => {
+      const posterUser = findAdminUser(n.adminId);
+
+      return {
+        ...n,
+        notificationId:
+          n.notificationId ||
+          n.id ||
+          `${n.postId}_${n.adminId}`,
+
+        adminName: posterUser?.name || "Unknown Admin",
+        adminProfile:
+          posterUser?.profileImage || "/default-profile.png",
+      };
+    });
+
+    setPostNotifications(enriched);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+    setPostNotifications([]);
+  }
+};
+
 
   useEffect(() => {
     if (!adminId) return;
@@ -85,25 +134,36 @@ function StudentsPage() {
     return () => clearInterval(interval);
   }, [adminId]);
 
-  const handleNotificationClick = async (notification) => {
-    // Mark as read in backend
+const handleNotificationClick = async (notification) => {
+  try {
     await axios.post(
       "http://127.0.0.1:5000/api/mark_post_notification_read",
-      { notificationId: notification.notificationId }
+      {
+        notificationId: notification.notificationId,
+        adminId: admin.userId,
+      }
     );
+  } catch (err) {
+    console.warn("Failed to delete notification:", err);
+  }
 
-    // Remove from UI
-    setPostNotifications(prev =>
-      prev.filter(n => n.notificationId !== notification.notificationId)
-    );
+  // 🔥 REMOVE FROM UI IMMEDIATELY
+  setPostNotifications((prev) =>
+    prev.filter((n) => n.notificationId !== notification.notificationId)
+  );
 
-    setShowPostDropdown(false);
+  setShowPostDropdown(false);
 
-    // Navigate to dashboard with postId
-    navigate("/dashboard", {
-      state: { postId: notification.postId }
-    });
-  };
+  // ➜ Navigate to post
+  navigate("/dashboard", {
+    state: { postId: notification.postId },
+  });
+};
+useEffect(() => {
+  if (location.state?.postId) {
+    setPostNotifications([]);
+  }
+}, []);
 
   const handleSendMessage = () => {
     // now newMessageText is defined

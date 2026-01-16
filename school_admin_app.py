@@ -58,13 +58,26 @@ def register_admin():
         username = data.get("username")
         name = data.get("name")
         password = data.get("password")
+        email = data.get("email")
+        gender = data.get("gender")
+        phone = data.get("phone")
+        title = data.get("title")
         profile = request.files.get("profile")
+
+        # Basic required checks (adjust as needed)
+        if not username or not name or not password or not email:
+            return jsonify({"success": False, "message": "Missing required fields (username, name, password, email)"}), 400
 
         # Check if username exists
         all_users = users_ref.get() or {}
         for u in all_users.values():
             if u.get("username") == username:
                 return jsonify({"success": False, "message": "Username already taken!"})
+
+        # Optionally check for existing email
+        for u in all_users.values():
+            if u.get("email") == email:
+                return jsonify({"success": False, "message": "Email already in use!"})
 
         profile_url = upload_file_to_firebase(profile, folder="profiles") if profile else ""
 
@@ -74,7 +87,10 @@ def register_admin():
             "userId": new_user.key,
             "name": name,
             "username": username,
-            "password": password,
+            "password": password,  # Consider hashing passwords before storing
+            "email": email,
+            "gender": gender,
+            "phone": phone,
             "profileImage": profile_url,
             "role": "School_Admins",
             "isActive": True
@@ -85,9 +101,8 @@ def register_admin():
         new_admin.set({
             "adminId": new_admin.key,
             "userId": new_user.key,
-            "username": username,
-            "password": password,
-            "name": name,
+           
+            "title": title,
         })
 
         return jsonify({"success": True, "message": "Registration successful!"})
@@ -401,7 +416,9 @@ def delete_post(postId):
     adminId = request.args.get("adminId")
 
     if not adminId:
-        return jsonify({"success": False, "message": "adminId missing"}), 400
+        return jsonify({"success": False, 
+                         
+                         "message": "adminId missing"}), 400
 
     post_ref = posts_ref.child(postId)
     post_data = post_ref.get()

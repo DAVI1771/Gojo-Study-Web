@@ -76,71 +76,72 @@ function MyPosts() {
 
   // ---------------- FETCH POST NOTIFICATIONS ----------------
   // Updated to enrich each notification with the poster's name and profile image
-  const fetchPostNotifications = async () => {
-    if (!adminId) return;
-    try {
-      const res = await axios.get(
-        `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
-      );
-      const rawNotifications = (res.data || []).map((n, index) => ({
-        ...n,
-        notificationId: n.notificationId || n.id || `notification-${index}-${Date.now()}`,
-      }));
+  
+ const fetchPostNotifications = async () => {
+  if (!adminId) return;
 
-      // If the notification already contains adminName/adminProfile, keep them.
-      // Otherwise, try to resolve the poster's user profile from RTDB:
-      // - If notification has userId -> Users/<userId>
-      // - If notification has adminId (e.g. "admin_001") -> School_Admins/<adminId>.userId -> Users/<userId>
-      // We'll fetch Users and School_Admins once to avoid many requests.
-      const [usersRes, adminsRes] = await Promise.allSettled([
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"),
-        axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins.json"),
-      ]);
+  try {
+    // 1️⃣ Get post notifications
+    const res = await axios.get(
+      `http://127.0.0.1:5000/api/get_post_notifications/${adminId}`
+    );
 
-      const usersData = usersRes.status === "fulfilled" ? usersRes.value.data || {} : {};
-      const adminsData = adminsRes.status === "fulfilled" ? adminsRes.value.data || {} : {};
+    let notifications = Array.isArray(res.data)
+      ? res.data
+      : Object.values(res.data || {});
 
-      const enriched = rawNotifications.map((n) => {
-        // prefer existing fields if provided by API
-        if (n.adminName && n.adminProfile) return n;
-
-        // determine candidate userId
-        let posterUserId = n.userId || n.posterUserId || null;
-
-        // if notification gives adminId (like "admin_001"), map to Users via School_Admins
-        if (!posterUserId && n.adminId) {
-          const adminEntry = adminsData[n.adminId];
-          if (adminEntry && adminEntry.userId) posterUserId = adminEntry.userId;
-        }
-
-        // Look up user object in Users
-        let userObj = null;
-        if (posterUserId) {
-          // Users in your RTDB may be keyed by their firebase key; find by matching user.userId === posterUserId
-          // but many datasets store the user under the key that is the userId; support both:
-          userObj = usersData[posterUserId] || Object.values(usersData).find(u => u?.userId === posterUserId) || null;
-        }
-
-        // Fallback: if notification contains adminName/adminProfile fields use them
-        const adminName = n.adminName || userObj?.name || userObj?.username || "Admin";
-        const adminProfile =
-          n.adminProfile ||
-          userObj?.profileImage ||
-          userObj?.profileImg ||
-          "/default-profile.png";
-
-        return {
-          ...n,
-          adminName,
-          adminProfile,
-        };
-      });
-
-      setPostNotifications(enriched);
-    } catch (err) {
-      console.error("Post notification fetch failed", err.response?.data || err);
+    if (notifications.length === 0) {
+      setPostNotifications([]);
+      return;
     }
-  };
+
+    // 2️⃣ Fetch Users & School_Admins
+    const [usersRes, adminsRes] = await Promise.all([
+      axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
+      ),
+      axios.get(
+        "https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins.json"
+      ),
+    ]);
+
+    const users = usersRes.data || {};
+    const admins = adminsRes.data || {};
+
+    // 3️⃣ Helpers
+    const findAdminUser = (adminId) => {
+      const admin = admins[adminId];
+      if (!admin) return null;
+
+      return Object.values(users).find(
+        (u) => u.userId === admin.userId
+      );
+    };
+
+    // 4️⃣ Enrich notifications
+    const enriched = notifications.map((n) => {
+      const posterUser = findAdminUser(n.adminId);
+
+      return {
+        ...n,
+        notificationId:
+          n.notificationId ||
+          n.id ||
+          `${n.postId}_${n.adminId}`,
+
+        adminName: posterUser?.name || "Unknown Admin",
+        adminProfile:
+          posterUser?.profileImage || "/default-profile.png",
+      };
+    });
+
+    setPostNotifications(enriched);
+  } catch (err) {
+    console.error("Post notification fetch failed", err);
+    setPostNotifications([]);
+  }
+};
+
 
   useEffect(() => {
     fetchPostNotifications();
@@ -149,20 +150,36 @@ function MyPosts() {
   }, [adminId]);
 
   const handleNotificationClick = async (notification) => {
-    if (!notification?.notificationId) return;
-    try {
-      await axios.post("http://127.0.0.1:5000/api/mark_post_notification_read", {
+  try {
+    await axios.post(
+      "http://127.0.0.1:5000/api/mark_post_notification_read",
+      {
         notificationId: notification.notificationId,
-      });
-      setPostNotifications((prev) =>
-        prev.filter((n) => n.notificationId !== notification.notificationId)
-      );
-      setShowPostDropdown(false);
-      navigate("/dashboard", { state: { postId: notification.postId } });
-    } catch (err) {
-      console.error("Mark notification read failed", err.response?.data || err);
-    }
-  };
+        adminId: admin.userId,
+      }
+    );
+  } catch (err) {
+    console.warn("Failed to delete notification:", err);
+  }
+
+  // 🔥 REMOVE FROM UI IMMEDIATELY
+  setPostNotifications((prev) =>
+    prev.filter((n) => n.notificationId !== notification.notificationId)
+  );
+
+  setShowPostDropdown(false);
+
+  // ➜ Navigate to post
+  navigate("/dashboard", {
+    state: { postId: notification.postId },
+  });
+};
+useEffect(() => {
+  if (location.state?.postId) {
+    setPostNotifications([]);
+  }
+}, []);
+
 
   // ---------------- FETCH MY POSTS ----------------
   const fetchMyPosts = async () => {
