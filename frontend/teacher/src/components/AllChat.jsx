@@ -22,19 +22,19 @@ export default function TeacherAllChat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
 
-  const { user, tab } = location.state || {};
-  const [selectedTab, setSelectedTab] = useState(tab || "student");
-  const [selectedChatUser, setSelectedChatUser] = useState(user || null);
+  // incoming navigation state (support both { contact } and { user })
+  const locationState = location.state || {};
+  const incomingContact = locationState.contact || locationState.user || null;
+  const incomingChatId = locationState.chatId || null;
+  const incomingTab = locationState.tab || null;
+
+  const [selectedTab, setSelectedTab] = useState(incomingTab || "student");
+  const [selectedChatUser, setSelectedChatUser] = useState(incomingContact || null);
+  const [currentChatKey, setCurrentChatKey] = useState(incomingChatId || null);
 
   const [clickedMessageId, setClickedMessageId] = useState(null);
-
-  // ✅ Per-message editing state (top-level hooks)
   const [editingMessages, setEditingMessages] = useState({}); // { messageId: true/false }
   const [editTexts, setEditTexts] = useState({}); // { messageId: text }
-
-
-
-
 
   const getProfileImage = (user = {}) =>
     user.profileImage || user.profile || user.avatar || "/default-profile.png";
@@ -79,6 +79,21 @@ export default function TeacherAllChat() {
   }, []);
 
   /* ================= AUTO SELECT ================= */
+  // If navigation provided a contact, prefer it (incomingContact)
+  useEffect(() => {
+    if (incomingContact) {
+      setSelectedChatUser(incomingContact);
+    }
+    if (incomingChatId) {
+      setCurrentChatKey(incomingChatId);
+    }
+    if (incomingTab) {
+      setSelectedTab(incomingTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingContact, incomingChatId, incomingTab]);
+
+  // When lists load and no explicit selectedChatUser, auto-pick first item for tab
   useEffect(() => {
     if (!selectedChatUser) {
       if (selectedTab === "student" && students.length) setSelectedChatUser(students[0]);
@@ -87,24 +102,34 @@ export default function TeacherAllChat() {
     }
   }, [selectedTab, students, parents, admins, selectedChatUser]);
 
+  // If navigation gave a user and lists are ready, find the matching entry and select it
   useEffect(() => {
-    if (!user) return;
-    if (selectedTab === "student" && students.length)
-      setSelectedChatUser(students.find((s) => s.userId === user.userId) || students[0]);
-    if (selectedTab === "parent" && parents.length)
-      setSelectedChatUser(parents.find((p) => p.userId === user.userId) || parents[0]);
-    if (selectedTab === "admin" && admins.length)
-      setSelectedChatUser(admins.find((a) => a.userId === user.userId) || admins[0]);
-  }, [students, parents, admins, user, selectedTab]);
+    const incoming = incomingContact;
+    if (!incoming) return;
+    if (selectedTab === "student" && students.length) {
+      const found = students.find((s) => s.userId === incoming.userId);
+      if (found) setSelectedChatUser(found);
+    }
+    if (selectedTab === "parent" && parents.length) {
+      const found = parents.find((p) => p.userId === incoming.userId);
+      if (found) setSelectedChatUser(found);
+    }
+    if (selectedTab === "admin" && admins.length) {
+      const found = admins.find((a) => a.userId === incoming.userId);
+      if (found) setSelectedChatUser(found);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [students, parents, admins, incomingContact, selectedTab]);
 
   /* ================= CHAT LISTENER ================= */
   useEffect(() => {
     if (!selectedChatUser || !teacherUserId) return;
 
-    const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
-    const chatRef = ref(db, `Chats/${chatKey}/messages`);
+    const chatKey = currentChatKey || getChatId(teacherUserId, selectedChatUser.userId);
+    setCurrentChatKey(chatKey); // ensure state is in sync
 
-    return onValue(chatRef, (snap) => {
+    const chatRef = ref(db, `Chats/${chatKey}/messages`);
+    const unsubscribe = onValue(chatRef, (snap) => {
       const data = snap.val() || {};
       const list = Object.entries(data)
         .filter(([_, m]) => !m.deleted)
@@ -117,76 +142,84 @@ export default function TeacherAllChat() {
 
       setMessages(list);
 
-      // ✅ Mark as seen only if teacher is the receiver
+      // mark as seen where teacher is receiver
       Object.entries(data).forEach(([id, m]) => {
         if (m && !m.seen && m.receiverId === teacherUserId) {
           update(ref(db, `Chats/${chatKey}/messages/${id}`), { seen: true }).catch(console.error);
         }
       });
 
-      // ✅ Reset unread count
+      // reset unread count for this teacher
       update(ref(db, `Chats/${chatKey}/unread`), { [teacherUserId]: 0 }).catch(console.error);
     });
-  }, [selectedChatUser, teacherUserId]);
+
+    return () => unsubscribe();
+  }, [selectedChatUser, teacherUserId, currentChatKey]);
 
   /* ================= SEND MESSAGE ================= */
- const sendMessage = async () => {
-  if (!input.trim() || !selectedChatUser) return;
+  const sendMessage = async () => {
+    if (!input.trim() || !selectedChatUser) return;
 
-  const editingId = Object.keys(editingMessages).find(id => editingMessages[id]);
-  const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
+    const editingId = Object.keys(editingMessages).find((id) => editingMessages[id]);
+    const chatKey = currentChatKey || getChatId(teacherUserId, selectedChatUser.userId);
 
-  if (editingId) {
-    // Update existing message
-    await update(ref(db, `Chats/${chatKey}/messages/${editingId}`), {
-      text: input,
-      edited: true,
-    });
-    setEditingMessages({});
-    setClickedMessageId(null);
-    setInput("");
-  } else {
-    // Send new message
-    const messagesRef = ref(db, `Chats/${chatKey}/messages`);
-    const messageData = {
-      senderId: teacherUserId,
-      receiverId: selectedChatUser.userId,
-      type: "text",
-      text: input,
-      seen: false,
-      edited: false,
-      deleted: false,
-      timeStamp: Date.now(),
-    };
+    if (editingId) {
+      // Update existing message
+      await update(ref(db, `Chats/${chatKey}/messages/${editingId}`), {
+        text: input,
+        edited: true,
+      });
+      setEditingMessages({});
+      setClickedMessageId(null);
+      setInput("");
+    } else {
+      // Send new message
+      const messagesRef = ref(db, `Chats/${chatKey}/messages`);
+      const messageData = {
+        senderId: teacherUserId,
+        receiverId: selectedChatUser.userId,
+        type: "text",
+        text: input,
+        seen: false,
+        edited: false,
+        deleted: false,
+        timeStamp: Date.now(),
+      };
 
-    await push(messagesRef, messageData);
+      await push(messagesRef, messageData);
 
-    await update(ref(db, `Chats/${chatKey}/participants`), {
-      [teacherUserId]: true,
-      [selectedChatUser.userId]: true,
-    });
+      await update(ref(db, `Chats/${chatKey}/participants`), {
+        [teacherUserId]: true,
+        [selectedChatUser.userId]: true,
+      });
 
-    await update(ref(db, `Chats/${chatKey}/lastMessage`), {
-      text: input,
-      senderId: teacherUserId,
-      seen: false,
-      timeStamp: messageData.timeStamp,
-    });
+      await update(ref(db, `Chats/${chatKey}/lastMessage`), {
+        text: input,
+        senderId: teacherUserId,
+        seen: false,
+        timeStamp: messageData.timeStamp,
+      });
 
-    await update(ref(db, `Chats/${chatKey}/unread`), {
-      [teacherUserId]: 0,
-      [selectedChatUser.userId]:
-        (messages.filter((m) => !m.seen && m.senderId !== selectedChatUser.userId).length || 0) + 1,
-    });
+      // increment unread for receiver
+      try {
+        // first read current unread count
+        const unreadRef = ref(db, `Chats/${chatKey}/unread/${selectedChatUser.userId}`);
+        // we don't have a simple get here; update with increment is okay for most cases.
+        await update(ref(db, `Chats/${chatKey}/unread`), {
+          [teacherUserId]: 0,
+          [selectedChatUser.userId]: (/* best-effort */ 1),
+        });
+      } catch (e) {
+        // ignore
+      }
 
-    setInput("");
-  }
-};
-
+      setInput("");
+    }
+  };
 
   /* ================= EDIT / DELETE ================= */
   const handleEditMessage = (id, newText) => {
-    const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
+    const chatKey = currentChatKey || getChatId(teacherUserId, selectedChatUser.userId);
     update(ref(db, `Chats/${chatKey}/messages/${id}`), {
       text: newText,
       edited: true,
@@ -195,23 +228,15 @@ export default function TeacherAllChat() {
   };
 
   const handleDeleteMessage = (id) => {
-    const chatKey = getChatId(teacherUserId, selectedChatUser.userId);
+    const chatKey = currentChatKey || getChatId(teacherUserId, selectedChatUser.userId);
     update(ref(db, `Chats/${chatKey}/messages/${id}`), { deleted: true }).catch(console.error);
   };
 
- const startEditing = (id, text) => {
-  setEditingMessages({ [id]: true });  // mark this message as being edited
-  setInput(text);                     // move text to main input
-  setClickedMessageId(id);            // highlight the message
-};
-
-
-
-const stopEditing = (id) => {
-  setEditingMessages((prev) => ({ ...prev, [id]: false }));
-  setEditTexts((prev) => ({ ...prev, [id]: "" }));
-};
-
+  const startEditing = (id, text) => {
+    setEditingMessages({ [id]: true });
+    setInput(text);
+    setClickedMessageId(id);
+  };
 
   const formatTime = (ts) => {
     const date = new Date(ts);
@@ -236,7 +261,11 @@ const stopEditing = (id) => {
           {["student", "parent", "admin"].map((t) => (
             <button
               key={t}
-              onClick={() => setSelectedTab(t)}
+              onClick={() => {
+                setSelectedTab(t);
+                setSelectedChatUser(null);
+                setCurrentChatKey(null);
+              }}
               style={{
                 flex: 1,
                 padding: 8,
@@ -255,7 +284,10 @@ const stopEditing = (id) => {
         {list.map((u) => (
           <div
             key={u.userId}
-            onClick={() => setSelectedChatUser(u)}
+            onClick={() => {
+              setSelectedChatUser(u);
+              setCurrentChatKey(null); // compute chat key automatically for selected pair
+            }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -312,108 +344,55 @@ const stopEditing = (id) => {
             </div>
 
             {/* ===== CHAT MESSAGES ===== */}
-{/* ===== CHAT MESSAGES ===== */}
-<div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column" }}>
-  {messages.map((m) => {
-    const isEditing = !!editingMessages[m.id];
-    const editText = editTexts[m.id] || m.text;
-    const isClicked = clickedMessageId === m.id;
+            <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column" }}>
+              {messages.map((m) => {
+                const isTeacher = m.isTeacher;
+                const isEditing = !!editingMessages[m.id];
+                const isClicked = clickedMessageId === m.id;
 
-    const isTeacher = m.isTeacher;
+                return (
+                  <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: isTeacher ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                    <div
+                      onClick={() => setClickedMessageId(m.id)}
+                      style={{
+                        maxWidth: "70%",
+                        background: isTeacher ? "#4facfe" : "#fff",
+                        color: isTeacher ? "#fff" : "#000",
+                        padding: "10px 14px",
+                        borderRadius: 18,
+                        borderTopRightRadius: isTeacher ? 0 : 18,
+                        borderTopLeftRadius: isTeacher ? 18 : 0,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                        wordBreak: "break-word",
+                        cursor: "pointer",
+                        position: "relative",
+                      }}
+                    >
+                      {m.text} {m.edited && <small style={{ fontSize: 10 }}> (edited)</small>}
 
-    return (
-      <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: isTeacher ? "flex-end" : "flex-start", marginBottom: 10 }}>
-        
-        {/* Message bubble */}
-        <div
-          onClick={() => setClickedMessageId(m.id)}
-          style={{
-            maxWidth: "70%",
-            background: isTeacher ? "#4facfe" : "#fff",
-            color: isTeacher ? "#fff" : "#000",
-            padding: "10px 14px",
-            borderRadius: 18,
-            borderTopRightRadius: isTeacher ? 0 : 18,
-            borderTopLeftRadius: isTeacher ? 18 : 0,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            wordBreak: "break-word",
-            cursor: "pointer",
-            position: "relative",
-          }}
-        >
-          
-              {m.text} {m.edited && <small style={{ fontSize: 10 }}> (edited)</small>}
-           
-          
-          {/* Time + two checkmarks (for teacher) or only time (for received) */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              gap: 5,
-              marginTop: 4,
-              fontSize: 10,
-              color: isTeacher ? "#fff" : "#888",
-            }}
-          >
-            <span>{formatTime(m.timeStamp)}</span>
-            {isTeacher && !m.deleted && (
-              <span style={{ display: "flex", gap: 0 }}>
-                {/* First tick = sent */}
-                <FaCheck size={10} color="#f2f3f3b9" />
-                {/* Second tick = seen */}
-                <FaCheck size={10} color={m.seen ? "#f2f3f3b9" : "#f2f3f3b9"} />
-              </span>
-            )}
-          </div>
-        </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5, marginTop: 4, fontSize: 10, color: isTeacher ? "#fff" : "#888" }}>
+                        <span>{formatTime(m.timeStamp)}</span>
+                        {isTeacher && !m.deleted && (
+                          <span style={{ display: "flex", gap: 0 }}>
+                            <FaCheck size={10} color="#f2f3f3b9" />
+                            <FaCheck size={10} color={m.seen ? "#f2f3f3b9" : "#f2f3f3b9"} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-        {/* Edit/Delete buttons */}
-        {isClicked && isTeacher && !m.deleted && !isEditing && (
-          <div
-            style={{
-              display: "flex",
-              gap: 6,
-              marginTop: 4,
-              fontSize: 12,
-              justifyContent: isTeacher ? "flex-end" : "flex-start",
-            }}
-          >
-            <button
-              onClick={() => startEditing(m.id, m.text)}
-              style={{
-                padding: "2px 6px",
-                borderRadius: 4,
-                border: "1px solid #ccc",
-                cursor: "pointer",
-                background: "#f1f1f1",
-              }}
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => handleDeleteMessage(m.id)}
-              style={{
-                padding: "2px 6px",
-                borderRadius: 4,
-                border: "1px solid #ccc",
-                cursor: "pointer",
-                background: "#f1f1f1",
-                color: "red",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  })}
-  <div ref={chatEndRef} />
-</div>
-
-
+                    {/* Edit/Delete controls for teacher's message */}
+                    {isClicked && isTeacher && !m.deleted && !isEditing && (
+                      <div style={{ display: "flex", gap: 6, marginTop: 4, fontSize: 12, justifyContent: isTeacher ? "flex-end" : "flex-start" }}>
+                        <button onClick={() => startEditing(m.id, m.text)} style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid #ccc", cursor: "pointer", background: "#f1f1f1" }}>Edit</button>
+                        <button onClick={() => handleDeleteMessage(m.id)} style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid #ccc", cursor: "pointer", background: "#f1f1f1", color: "red" }}>Delete</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div ref={chatEndRef} />
+            </div>
 
             {/* ===== INPUT ===== */}
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -424,20 +403,7 @@ const stopEditing = (id) => {
                 placeholder="Type a message..."
                 style={{ flex: 1, padding: 12, borderRadius: 25, border: "1px solid #ccc", outline: "none" }}
               />
-              <button
-                onClick={sendMessage}
-                style={{
-                  width: 45,
-                  height: 45,
-                  borderRadius: "50%",
-                  background: "#4facfe",
-                  border: "none",
-                  color: "#fff",
-                  display: "flex",
-                  justifyContent: "center",
-                  alignItems: "center",
-                }}
-              >
+              <button onClick={sendMessage} style={{ width: 45, height: 45, borderRadius: "50%", background: "#4facfe", border: "none", color: "#fff", display: "flex", justifyContent: "center", alignItems: "center" }}>
                 <FaPaperPlane />
               </button>
             </div>

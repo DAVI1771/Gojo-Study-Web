@@ -415,10 +415,7 @@ useEffect(() => {
         <h2>Gojo Dashboard</h2>
 
         {/* Search Bar */}
-        <div className="nav-search">
-          <FaSearch className="search-icon" />
-          <input type="text" placeholder="Search Teacher and Student..." />
-        </div>
+   
 
         <div className="nav-right">
           {/* Notification */}

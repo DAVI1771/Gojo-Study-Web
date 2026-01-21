@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FaArrowLeft, FaPaperPlane, FaEdit, FaTrash } from "react-icons/fa";
+import { FaArrowLeft, FaPaperPlane } from "react-icons/fa";
 import { getDatabase, ref, onValue, push, set, update, get } from "firebase/database";
 import { db } from "../firebase";
 import "../styles/global.css";
@@ -27,12 +27,10 @@ function AllChat() {
   const [typing, setTyping] = useState(false);
   const [lastSeen, setLastSeen] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-
   const chatEndRef = useRef(null);
   const typingRef = useRef(null);
-  const messageRefs = useRef({});
 
-  // ------------------- Fetch users -------------------
+  // ------------------- Fetch users with unread badge -------------------
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -51,8 +49,21 @@ function AllChat() {
           Object.keys(listData || {}).map(id => {
             const userId = listData[id].userId;
             const user = usersData[userId] || {};
-            const chatKey = `${userId}_${adminUserId}`;
-            const lastMsg = chatsData[chatKey]?.lastMessage || null;
+            const chatKeyA = `${adminUserId}_${userId}`;
+            const chatKeyB = `${userId}_${adminUserId}`;
+            // Try both directions for unread
+            const unreadA = chatsData[chatKeyA]?.unread?.[adminUserId] || 0;
+            const unreadB = chatsData[chatKeyB]?.unread?.[adminUserId] || 0;
+            // Use the one where they're the other participant (unread for YOU)
+            const unread = Math.max(unreadA, unreadB);
+
+            // Get last message in either chat (most recent by time)
+            const lastA = chatsData[chatKeyA]?.lastMessage;
+            const lastB = chatsData[chatKeyB]?.lastMessage;
+            let lastMsg = lastA && lastB
+              ? (lastA.timeStamp > lastB.timeStamp ? lastA : lastB)
+              : (lastA || lastB);
+
             return {
               id,
               userId,
@@ -61,7 +72,7 @@ function AllChat() {
               lastMsgTime: lastMsg?.timeStamp || 0,
               lastMsgText: lastMsg?.text || "",
               lastSeen: user.lastSeen || null,
-              unread: chatsData[chatKey]?.unread?.[userId] || 0
+              unread,
             };
           }).sort((a, b) => b.lastMsgTime - a.lastMsgTime);
 
@@ -87,42 +98,72 @@ function AllChat() {
   // ------------------- Real-time messages -------------------
   useEffect(() => {
     if (!selectedChatUser || !adminUserId) return;
-    const chatKey = `${selectedChatUser.userId}_${adminUserId}`;
-    const messagesRef = ref(db, `Chats/${chatKey}/messages`);
-    const typingRefDB = ref(db, `Chats/${chatKey}/typing`);
-    const lastSeenRef = ref(db, `Users/${selectedChatUser.userId}/lastSeen`);
+    const chatKeyA = `${adminUserId}_${selectedChatUser.userId}`;
+    const chatKeyB = `${selectedChatUser.userId}_${adminUserId}`;
+    // Try both possible keys
+    let foundKey = null;
 
-    const unsubscribeMessages = onValue(messagesRef, (snapshot) => {
-      const data = snapshot.val();
-      const msgs = data
-        ? Object.entries(data).map(([id, m]) => ({ ...m, id, sender: m.senderId === adminUserId ? "admin" : "user" }))
-        : [];
-      setPopupMessages(msgs.sort((a, b) => a.timeStamp - b.timeStamp));
-    });
+    // Check which chat exists
+    const dbCheck = async () => {
+      const dbInst = getDatabase();
+      const refA = ref(dbInst, `Chats/${chatKeyA}/messages`);
+      const refB = ref(dbInst, `Chats/${chatKeyB}/messages`);
+      let usedKey = chatKeyA;
+      await get(refA).then(snapshot => {
+        if (!snapshot.exists()) {
+          usedKey = chatKeyB;
+        }
+      });
+      foundKey = usedKey;
 
-    const unsubscribeTyping = onValue(typingRefDB, (snapshot) => {
-      const val = snapshot.val();
-      setTyping(val?.userId === selectedChatUser.userId);
-    });
+      const messagesRef = ref(db, `Chats/${usedKey}/messages`);
+      const typingRefDB = ref(db, `Chats/${usedKey}/typing`);
+      const lastSeenRef = ref(db, `Users/${selectedChatUser.userId}/lastSeen`);
 
-    const unsubscribeLastSeen = onValue(lastSeenRef, (snapshot) => {
-      setLastSeen(snapshot.val());
-    });
+      const unsubscribeMessages = onValue(messagesRef, (snapshot) => {
+        const data = snapshot.val();
+        const msgs = data
+          ? Object.entries(data).map(([id, m]) => ({ ...m, id, sender: m.senderId === adminUserId ? "admin" : "user" }))
+          : [];
+        setPopupMessages(msgs.sort((a, b) => a.timeStamp - b.timeStamp));
+      });
 
-    return () => {
-      unsubscribeMessages();
-      unsubscribeTyping();
-      unsubscribeLastSeen();
+      const unsubscribeTyping = onValue(typingRefDB, (snapshot) => {
+        const val = snapshot.val();
+        setTyping(val?.userId === selectedChatUser.userId);
+      });
+
+      const unsubscribeLastSeen = onValue(lastSeenRef, (snapshot) => {
+        setLastSeen(snapshot.val());
+      });
+
+      return () => {
+        unsubscribeMessages();
+        unsubscribeTyping();
+        unsubscribeLastSeen();
+      };
     };
+    dbCheck();
+    // (cleanup done by Firebase automatically);
   }, [selectedChatUser, adminUserId]);
 
   // ------------------- Send/Edit message -------------------
   const sendPopupMessage = async () => {
     if (!popupInput.trim() || !selectedChatUser) return;
 
-    const chatKey = `${selectedChatUser.userId}_${adminUserId}`;
-    const messagesRef = ref(db, `Chats/${chatKey}/messages`);
-    const chatRef = ref(db, `Chats/${chatKey}`);
+    const chatKeyA = `${adminUserId}_${selectedChatUser.userId}`;
+    const chatKeyB = `${selectedChatUser.userId}_${adminUserId}`;
+    // Prefer existing, else use ordering
+    let chatRefKey = chatKeyA;
+    let existA = false, existB = false;
+    if (db) {
+      await get(ref(db, `Chats/${chatKeyA}/messages`)).then(s => existA = s.exists());
+      await get(ref(db, `Chats/${chatKeyB}/messages`)).then(s => existB = s.exists());
+      if (existB && !existA) chatRefKey = chatKeyB;
+    }
+
+    const messagesRef = ref(db, `Chats/${chatRefKey}/messages`);
+    const chatRef = ref(db, `Chats/${chatRefKey}`);
 
     const newMsg = {
       senderId: adminUserId,
@@ -138,7 +179,7 @@ function AllChat() {
     };
 
     if (editingMsgId) {
-      await update(ref(db, `Chats/${chatKey}/messages/${editingMsgId}`), { text: popupInput, edited: true });
+      await update(ref(db, `Chats/${chatRefKey}/messages/${editingMsgId}`), { text: popupInput, edited: true });
       setEditingMsgId(null);
     } else {
       const msgRef = push(messagesRef);
@@ -157,17 +198,25 @@ function AllChat() {
   // ------------------- Delete message -------------------
   const deleteMessage = async (msgId) => {
     if (!selectedChatUser) return;
-    const chatKey = `${selectedChatUser.userId}_${adminUserId}`;
-    const msgRef = ref(db, `Chats/${chatKey}/messages/${msgId}`);
+    const chatKeyA = `${adminUserId}_${selectedChatUser.userId}`;
+    const chatKeyB = `${selectedChatUser.userId}_${adminUserId}`;
+    let chatRefKey = chatKeyA;
+    let existA = false, existB = false;
+    if (db) {
+      await get(ref(db, `Chats/${chatKeyA}/messages`)).then(s => existA = s.exists());
+      await get(ref(db, `Chats/${chatKeyB}/messages`)).then(s => existB = s.exists());
+      if (existB && !existA) chatRefKey = chatKeyB;
+    }
+    const msgRef = ref(db, `Chats/${chatRefKey}/messages/${msgId}`);
     await update(msgRef, { deleted: true });
 
     // Update lastMessage if deleted
-    const lastMsgSnapshot = await get(ref(db, `Chats/${chatKey}/lastMessage`));
+    const lastMsgSnapshot = await get(ref(db, `Chats/${chatRefKey}/lastMessage`));
     if (lastMsgSnapshot.exists() && lastMsgSnapshot.val().messageId === msgId) {
-      const messagesSnapshot = await get(ref(db, `Chats/${chatKey}/messages`));
+      const messagesSnapshot = await get(ref(db, `Chats/${chatRefKey}/messages`));
       const messages = messagesSnapshot.exists() ? Object.entries(messagesSnapshot.val()).map(([id, m]) => ({ ...m, id })) : [];
-      const lastMsg = messages.sort((a, b) => b.timeStamp - a.timeStamp)[0] || null;
-      await update(ref(db, `Chats/${chatKey}`), { lastMessage: lastMsg ? { ...lastMsg, messageId: lastMsg.id } : null });
+      const lastMsg = messages.filter(m => !m.deleted).sort((a, b) => b.timeStamp - a.timeStamp)[0] || null;
+      await update(ref(db, `Chats/${chatRefKey}`), { lastMessage: lastMsg ? { ...lastMsg, messageId: lastMsg.id } : null });
     }
   };
 
@@ -176,8 +225,17 @@ function AllChat() {
     setPopupInput(e.target.value);
     if (!selectedChatUser) return;
 
-    const chatKey = `${selectedChatUser.userId}_${adminUserId}`;
-    const typingRefDB = ref(db, `Chats/${chatKey}/typing`);
+    const chatKeyA = `${adminUserId}_${selectedChatUser.userId}`;
+    const chatKeyB = `${selectedChatUser.userId}_${adminUserId}`;
+    let chatRefKey = chatKeyA;
+    let existA = false, existB = false;
+    if (db) {
+      await get(ref(db, `Chats/${chatKeyA}/messages`)).then(s => existA = s.exists());
+      await get(ref(db, `Chats/${chatKeyB}/messages`)).then(s => existB = s.exists());
+      if (existB && !existA) chatRefKey = chatKeyB;
+    }
+
+    const typingRefDB = ref(db, `Chats/${chatRefKey}/typing`);
     await set(typingRefDB, { userId: adminUserId });
 
     if (typingRef.current) clearTimeout(typingRef.current);
@@ -196,6 +254,7 @@ function AllChat() {
     return new Date(Number(timestamp)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // TELEGRAM-LIKE UNREAD BADGE, left of avatar
   const renderUserList = (users) =>
     users
       .filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -212,9 +271,30 @@ function AllChat() {
             background: selectedChatUser?.userId === u.userId ? "#d0e6ff" : "#fff",
             cursor: "pointer",
             marginBottom: 8,
+            position: "relative",
             transition: "0.2s all"
           }}
         >
+          {u.unread > 0 && (
+            <span
+              style={{
+                marginRight: 7,
+                minWidth: 22,
+                height: 22,
+                background: "#f44336",
+                color: "#fff",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+                fontSize: 13,
+                boxShadow: "0 1px 8px rgba(255,0,0,0.11)"
+              }}
+            >
+              {u.unread > 99 ? "99+" : u.unread}
+            </span>
+          )}
           <img src={u.profileImage} alt={u.name} style={{ width: 40, height: 40, borderRadius: "50%" }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 500 }}>{u.name}</div>
@@ -222,7 +302,7 @@ function AllChat() {
           </div>
           <span
             style={{
-              width: 10,
+              minWidth: 10,
               height: 10,
               borderRadius: "50%",
               background: u.lastSeen && Date.now() - u.lastSeen < 60000 ? "green" : "gray"
@@ -296,64 +376,64 @@ function AllChat() {
               {popupMessages.length === 0 ? (
                 <p style={{ color: "#888", textAlign: "center", marginTop: 20 }}>Start chatting with {selectedChatUser.name}...</p>
               ) : popupMessages.map(m => {
-                  const isAdmin = m.sender === "admin";
-                  const isSelected = activeMessageId === m.id;
-                  if (m.deleted) return null;
+                const isAdmin = m.sender === "admin";
+                const isSelected = activeMessageId === m.id;
+                if (m.deleted) return null;
 
-               return (
-    <div
-      key={m.id}
-      onClick={() => setActiveMessageId(m.id)}
-      style={{
-        display: "flex",
-        flexDirection: "column", // column to stack bubble and buttons
-        alignItems: isAdmin ? "flex-end" : "flex-start",
-        marginBottom: 12,
-      }}
-    >
-      {/* Message Bubble */}
-      <div
-        style={{
-          background: isAdmin ? "#0084ff" : "#e4e6eb",
-          color: isAdmin ? "#fff" : "#000",
-          padding: "8px 12px",
-          borderRadius: 16,
-          borderTopRightRadius: isAdmin ? 0 : 16,
-          borderTopLeftRadius: isAdmin ? 16 : 0,
-          maxWidth: "45%",
-          wordBreak: "break-word",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div>{m.text}</div>
-        {m.edited && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>edited</div>}
-        <div style={{ fontSize: 10, opacity: 0.7, display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-          <span>{formatTime(m.timeStamp)}</span>
-          {isAdmin && <span>{m.seen ? "✔✔" : "✔"}</span>}
-        </div>
-      </div>
+                return (
+                  <div
+                    key={m.id}
+                    onClick={() => setActiveMessageId(m.id)}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: isAdmin ? "flex-end" : "flex-start",
+                      marginBottom: 12,
+                    }}
+                  >
+                    {/* Message Bubble */}
+                    <div
+                      style={{
+                        background: isAdmin ? "#0084ff" : "#e4e6eb",
+                        color: isAdmin ? "#fff" : "#000",
+                        padding: "8px 12px",
+                        borderRadius: 16,
+                        borderTopRightRadius: isAdmin ? 0 : 16,
+                        borderTopLeftRadius: isAdmin ? 16 : 0,
+                        maxWidth: "45%",
+                        wordBreak: "break-word",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div>{m.text}</div>
+                      {m.edited && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>edited</div>}
+                      <div style={{ fontSize: 10, opacity: 0.7, display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
+                        <span>{formatTime(m.timeStamp)}</span>
+                        {isAdmin && <span>{m.seen ? "✔✔" : "✔"}</span>}
+                      </div>
+                    </div>
 
-      {/* Edit/Delete Buttons (under the bubble) */}
-      {isSelected && isAdmin && (
-        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-          <button
-            onClick={() => { setPopupInput(m.text); setEditingMsgId(m.id); }}
-            style={{ fontSize: 12 }}
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => deleteMessage(m.id)}
-            style={{ fontSize: 12, color: "red" }}
-          >
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
-  );
-                })}
+                    {/* Edit/Delete Buttons (under the bubble) */}
+                    {isSelected && isAdmin && (
+                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                        <button
+                          onClick={() => { setPopupInput(m.text); setEditingMsgId(m.id); }}
+                          style={{ fontSize: 12 }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMessage(m.id)}
+                          style={{ fontSize: 12, color: "red" }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div ref={chatEndRef}></div>
             </div>
 

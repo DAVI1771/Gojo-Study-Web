@@ -27,213 +27,95 @@ export default function Dashboard() {
   const [highlightedPostId, setHighlightedPostId] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
 
+  // Messenger state
+  const [showMessenger, setShowMessenger] = useState(false);
+  const [conversations, setConversations] = useState([]); // only conversations that have unread messages for me
   const postRefs = useRef({});
+  const postRefsRerender = useRef(0);
 
-  // On mount: load teacher from localStorage and ensure we have fresh profileImage/name
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem("teacher"));
     if (!stored) {
       navigate("/login");
       return;
     }
-
-    // set partial right away so UI isn't blank
     setTeacher(stored);
-
-    // fetch full user record from RTDB Users node to pick up profileImage/name/username if missing
-    const enrichTeacher = async () => {
-      try {
-        const usersRes = await axios.get(`${RTDB_BASE}/Users.json`);
-        const users = usersRes.data || {};
-
-        // Try to find by userId (preferred), then by username, then by teacherId field
-        const findUser = () => {
-          if (stored.userId) {
-            const byKey = Object.values(users).find(u => u && u.userId === stored.userId);
-            if (byKey) return byKey;
-          }
-          if (stored.username) {
-            const byUsername = Object.values(users).find(u => u && u.username === stored.username);
-            if (byUsername) return byUsername;
-          }
-          if (stored.teacherId) {
-            const byTeacherId = Object.values(users).find(u => u && u.teacherId === stored.teacherId);
-            if (byTeacherId) return byTeacherId;
-          }
-          // fallback: try to find by name
-          const byName = Object.values(users).find(u => u && u.name === stored.name);
-          if (byName) return byName;
-          return null;
-        };
-
-        const userRec = findUser();
-        if (userRec) {
-          // merge and persist to localStorage so subsequent loads are fast
-          const merged = {
-            ...stored,
-            name: userRec.name || stored.name,
-            username: userRec.username || stored.username,
-            profileImage: userRec.profileImage || stored.profileImage || "/default-profile.png",
-            email: userRec.email || stored.email,
-            phone: userRec.phone || stored.phone,
-            userId: userRec.userId || stored.userId,
-            teacherId: userRec.teacherId || stored.teacherId
-          };
-          setTeacher(merged);
-          try {
-            localStorage.setItem("teacher", JSON.stringify(merged));
-          } catch (err) {
-            // ignore localStorage write failures
-          }
-        } else {
-          // if no user record found, ensure profileImage fallback exists
-          const fallback = {
-            ...stored,
-            profileImage: stored.profileImage || "/default-profile.png"
-          };
-          setTeacher(fallback);
-        }
-      } catch (err) {
-        console.error("Failed to fetch teacher profile from RTDB:", err);
-        // ensure profileImage is present even on error
-        setTeacher(prev => prev ? { ...prev, profileImage: prev.profileImage || "/default-profile.png" } : prev);
-      }
-    };
-
-    enrichTeacher();
-    fetchPosts(); // also load posts
+    fetchPostsAndAdmins();
+    fetchConversations(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Primary function: fetch posts, then fetch School_Admins and Users and resolve poster info.
-  const fetchPosts = async () => {
+  // Fetch posts and resolve admin info
+  const fetchPostsAndAdmins = async () => {
     try {
       const postsResp = await axios.get(`${API_BASE}/get_posts`);
       let postsData = postsResp.data || [];
-
-      // normalize if backend returned object keyed by id
-      if (!Array.isArray(postsData) && typeof postsData === "object") {
+      if (!Array.isArray(postsData) && typeof postsData === "object")
         postsData = Object.values(postsData);
-      }
 
-      // fetch School_Admins and Users from RTDB
       const [adminsResp, usersResp] = await Promise.all([
         axios.get(`${RTDB_BASE}/School_Admins.json`),
         axios.get(`${RTDB_BASE}/Users.json`),
       ]);
-
       const schoolAdmins = adminsResp.data || {};
       const users = usersResp.data || {};
 
-      // helpers for lookups
-      const getSchoolAdminByKey = (key) => {
-        if (!key) return null;
-        return schoolAdmins[key] || null;
+      const resolveAdminInfo = (adminId) => {
+        if (!adminId) return { name: "Admin", profile: "/default-profile.png" };
+        const adminRec = schoolAdmins[adminId];
+        if (!adminRec) return { name: adminId, profile: "/default-profile.png" };
+        const userKey = adminRec.userId;
+        const userRec = userKey ? users[userKey] : null;
+        const name = userRec?.name || adminRec?.title || adminId;
+        const profile = userRec?.profileImage || "/default-profile.png";
+        return { name, profile };
       };
 
-      const getUserByKey = (key) => {
-        if (!key) return null;
-        return users[key] || null;
-      };
-
-      // sometimes the value in post.adminId might be a Users key or a user.userId field value
-      const getUserByUserIdField = (userIdField) => {
-        if (!userIdField) return null;
-        return Object.values(users).find((u) => u && u.userId === userIdField) || null;
-      };
-
-      // enrich each post with adminName & adminProfile
-      const enriched = postsData.map((raw) => {
-        const post = { ...raw };
-
-        // normalize id fields
-        const postId = post.postId || post.id || post.key || null;
-
-        // normalize likes
+      const finalPosts = postsData.map((post) => {
+        const postId = post.postId || post.id || post.key || "";
+        const { name, profile } = resolveAdminInfo(post.adminId);
         let likesArray = [];
         if (Array.isArray(post.likes)) likesArray = post.likes;
-        else if (post.likes && typeof post.likes === "object") likesArray = Object.keys(post.likes);
-        else likesArray = [];
+        else if (post.likes && typeof post.likes === "object")
+          likesArray = Object.keys(post.likes);
 
-        // pick time
         const timeValue = post.time || post.timestamp || post.createdAt || null;
-
-        // Resolve poster:
-        // Posts[].adminId is the School_Admins RTDB key (per your DB)
-        const adminIdFromPost = post.adminId || post.posterAdminId || post.poster || post.admin || null;
-
-        let adminName = post.adminName || null;
-        let adminProfile = post.adminProfile || null;
-
-        if (adminIdFromPost) {
-          // 1) Try: adminIdFromPost is a School_Admins key
-          const schoolAdminRecord = getSchoolAdminByKey(adminIdFromPost);
-          if (schoolAdminRecord) {
-            // that record has userId which points to Users key
-            const userKey = schoolAdminRecord.userId;
-            const userRecord = getUserByKey(userKey) || getUserByUserIdField(userKey);
-
-            if (userRecord) {
-              adminName = adminName || userRecord.name || userRecord.username || schoolAdminRecord.name;
-              adminProfile = adminProfile || userRecord.profileImage || userRecord.profile || "/default-profile.png";
-            } else {
-              // user not found but school admin has name
-              adminName = adminName || schoolAdminRecord.name || schoolAdminRecord.username || "Admin";
-              adminProfile = adminProfile || schoolAdminRecord.profileImage || "/default-profile.png";
-            }
-          } else {
-            // 2) Maybe adminIdFromPost is already the Users key
-            const userRecordDirect = getUserByKey(adminIdFromPost) || getUserByUserIdField(adminIdFromPost);
-            if (userRecordDirect) {
-              adminName = adminName || userRecordDirect.name || userRecordDirect.username || "Admin";
-              adminProfile = adminProfile || userRecordDirect.profileImage || "/default-profile.png";
-            } else {
-              // 3) fallback to any adminName/profile fields in post
-              adminName = adminName || post.name || post.username || "Admin";
-              adminProfile = adminProfile || post.profileImage || post.authorProfile || "/default-profile.png";
-              console.warn(`Unresolved adminId "${adminIdFromPost}" for post ${postId}. Falling back to post fields.`);
-            }
-          }
-        } else {
-          // no adminId in post; try existing fields
-          adminName = adminName || post.adminName || post.name || post.username || "Admin";
-          adminProfile = adminProfile || post.adminProfile || post.profileImage || "/default-profile.png";
-        }
-
-        // ensure fallbacks
-        adminName = adminName || "Admin";
-        adminProfile = adminProfile || "/default-profile.png";
 
         return {
           ...post,
           postId,
-          adminName,
-          adminProfile,
+          adminName: name,
+          adminProfile: profile,
           time: timeValue,
           likes: likesArray,
           likeCount: post.likeCount || likesArray.length || 0,
         };
       });
 
-      // sort newest first
-      enriched.sort((a, b) => {
+      finalPosts.sort((a, b) => {
         const ta = a.time ? new Date(a.time).getTime() : 0;
         const tb = b.time ? new Date(b.time).getTime() : 0;
         return tb - ta;
       });
 
-      setPosts(enriched);
+      setPosts(finalPosts);
 
-      // build notifications (most recent 5)
-      const latestNotifications = enriched.slice(0, 5).map((p) => ({
-        id: p.postId,
-        title: p.message?.substring(0, 80) || "Untitled post",
-        adminName: p.adminName,
-        adminProfile: p.adminProfile,
-      }));
-      setNotifications(latestNotifications);
+      const storedTeacher = JSON.parse(localStorage.getItem("teacher"));
+      const seenPosts = getSeenPosts(storedTeacher?.userId);
+
+      const notifs = finalPosts
+        .filter((p) => !seenPosts.includes(p.postId))
+        .slice(0, 5)
+        .map((p) => ({
+          id: p.postId,
+          title: p.message?.substring(0, 80) || "Untitled post",
+          adminName: p.adminName,
+          adminProfile: p.adminProfile,
+        }));
+
+      setNotifications(notifs);
     } catch (err) {
-      console.error("Error fetching posts / resolving admins:", err);
+      console.error("Error fetching posts/admins handshake:", err);
     }
   };
 
@@ -260,17 +142,26 @@ export default function Dashboard() {
     }
   };
 
-  const handleNotificationClick = (postId, index) => {
+  // Seen posts local storage helpers
+  const getSeenPosts = (teacherId) => {
+    return JSON.parse(localStorage.getItem(`seen_posts_${teacherId}`)) || [];
+  };
+
+  const saveSeenPost = (teacherId, postId) => {
+    const seen = getSeenPosts(teacherId);
+    if (!seen.includes(postId)) {
+      localStorage.setItem(`seen_posts_${teacherId}`, JSON.stringify([...seen, postId]));
+    }
+  };
+
+  // Remove notification after click (and mark seen locally)
+  const handleNotificationClick = (postId) => {
+    if (!teacher) return;
+    saveSeenPost(teacher.userId, postId);
     setHighlightedPostId(postId);
     const el = postRefs.current[postId];
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-
-    setNotifications((prev) => {
-      const copy = [...prev];
-      copy.splice(index, 1);
-      return copy;
-    });
-
+    setNotifications((prev) => prev.filter((n) => n.id !== postId));
     setShowNotifications(false);
     setTimeout(() => setHighlightedPostId(null), 3000);
   };
@@ -280,8 +171,124 @@ export default function Dashboard() {
     navigate("/login");
   };
 
-  if (!teacher) return null;
+  // ---------------- MESSENGER: fetch conversations with unread messages ----------------
+ // Replace fetchConversations in Dashboard with this:
+const fetchConversations = async (currentTeacher = teacher) => {
+  try {
+    const t = currentTeacher || JSON.parse(localStorage.getItem("teacher"));
+    if (!t || !t.userId) {
+      setConversations([]);
+      return;
+    }
 
+    const [chatsRes, usersRes] = await Promise.all([
+      axios.get(`${RTDB_BASE}/Chats.json`),
+      axios.get(`${RTDB_BASE}/Users.json`),
+    ]);
+    const chats = chatsRes.data || {};
+    const users = usersRes.data || {};
+
+    // map user.pushKey -> record and userId -> pushKey
+    const usersByKey = users || {};
+    const userKeyByUserId = {};
+    Object.entries(usersByKey).forEach(([pushKey, u]) => {
+      if (u && u.userId) userKeyByUserId[u.userId] = pushKey;
+    });
+
+    const convs = Object.entries(chats)
+      .map(([chatId, chat]) => {
+        const unreadMap = chat.unread || {};
+        const unreadForMe = unreadMap[t.userId] || 0;
+        if (!unreadForMe) return null; // only show convs with unread messages
+
+        const participants = chat.participants || {};
+        // find the "other" participant key (could be pushKey or a userId)
+        const otherKeyCandidate = Object.keys(participants || {}).find((p) => p !== t.userId);
+        if (!otherKeyCandidate) return null;
+
+        // Try to resolve the other participant to a Users pushKey + record
+        let otherPushKey = otherKeyCandidate;
+        let otherRecord = usersByKey[otherPushKey];
+
+        if (!otherRecord) {
+          // otherKeyCandidate might be a user.userId; map to pushKey
+          const mappedPushKey = userKeyByUserId[otherKeyCandidate];
+          if (mappedPushKey) {
+            otherPushKey = mappedPushKey;
+            otherRecord = usersByKey[mappedPushKey];
+          }
+        }
+
+        // If still not found, fall back to a minimal contact (use candidate as userId)
+        if (!otherRecord) {
+          otherRecord = { userId: otherKeyCandidate, name: otherKeyCandidate, profileImage: "/default-profile.png" };
+        }
+
+        const contact = {
+          pushKey: otherPushKey,                       // may be undefined if unknown
+          userId: otherRecord.userId || otherKeyCandidate,
+          name: otherRecord.name || otherRecord.username || otherKeyCandidate,
+          profileImage: otherRecord.profileImage || otherRecord.profile || "/default-profile.png",
+        };
+
+        const lastMessage = chat.lastMessage || {};
+
+        return {
+          chatId,
+          contact, // full contact object we will pass when opening chat
+          displayName: contact.name,
+          profile: contact.profileImage,
+          lastMessageText: lastMessage.text || "",
+          lastMessageTime: lastMessage.timeStamp || lastMessage.time || null,
+          unreadForMe,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+    setConversations(convs);
+  } catch (err) {
+    console.error("Error fetching conversations:", err);
+    setConversations([]);
+  }
+};
+
+// Replace handleOpenConversation in Dashboard with this:
+const handleOpenConversation = async (conv, index) => {
+  if (!teacher || !conv) return;
+  const { chatId, contact } = conv;
+
+  // Pass a concrete contact object to AllChat so it opens that exact person
+  navigate("/all-chat", { state: { contact, chatId } });
+
+  // Clear unread count for this teacher in RTDB (permanent)
+  try {
+    await axios.put(`${RTDB_BASE}/Chats/${chatId}/unread/${teacher.userId}.json`, null);
+  } catch (err) {
+    console.error("Failed to clear unread in DB:", err);
+  }
+
+  // Remove from UI immediately
+  setConversations((prev) => prev.filter((_, i) => i !== index));
+  setShowMessenger(false);
+};
+
+  // Toggle messenger and refresh conversations
+  const handleMessengerToggle = async () => {
+    setShowMessenger((s) => !s);
+    await fetchConversations();
+  };
+
+
+  // total unread messages (sum of unreadForMe across conversations)
+  const totalUnreadMessages = conversations.reduce((sum, c) => sum + (c.unreadForMe || 0), 0);
+
+  // Safe teacher for rendering
+  const t = teacher || {};
+
+
+
+  
   return (
     <div className="dashboard-page">
       <nav className="top-navbar">
@@ -293,6 +300,7 @@ export default function Dashboard() {
         </div>
 
         <div className="nav-right">
+          {/* Notifications */}
           <div className="icon-circle" style={{ position: "relative" }}>
             <div onClick={() => setShowNotifications(!showNotifications)} style={{ cursor: "pointer", position: "relative" }}>
               <FaBell size={22} />
@@ -310,9 +318,7 @@ export default function Dashboard() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center"
-                }}>
-                  {notifications.length}
-                </span>
+                }}>{notifications.length}</span>
               )}
             </div>
 
@@ -330,7 +336,8 @@ export default function Dashboard() {
                 zIndex: 200
               }}>
                 {notifications.length > 0 ? notifications.map((n, i) => (
-                  <div key={n.id || i} onClick={() => handleNotificationClick(n.id, i)} style={{ display: "flex", gap: 12, alignItems: "center", padding: 12, borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                  <div key={n.id || i} onClick={() => handleNotificationClick(n.id)}
+                    style={{ display: "flex", gap: 12, alignItems: "center", padding: 12, borderBottom: "1px solid #eee", cursor: "pointer" }}>
                     <img src={n.adminProfile || "/default-profile.png"} alt={n.adminName || "Admin"} style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
                     <div>
                       <strong style={{ display: "block" }}>{n.adminName}</strong>
@@ -342,10 +349,73 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="icon-circle"><FaFacebookMessenger /></div>
+          {/* Messenger */}
+          <div className="icon-circle" style={{ position: "relative", marginLeft: 12 }}>
+            <div onClick={handleMessengerToggle} style={{ cursor: "pointer", position: "relative" }}>
+              <FaFacebookMessenger size={22} />
+              {/* show total unread messages (not people) */}
+              {totalUnreadMessages > 0 && (
+                <span style={{
+                  position: "absolute",
+                  top: -6,
+                  right: -6,
+                  background: "#0b78f6",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  minWidth: 18,
+                  height: 18,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 5px"
+                }}>
+                  {totalUnreadMessages}
+                </span>
+              )}
+            </div>
+
+            {showMessenger && (
+              <div style={{
+                position: "absolute",
+                top: 34,
+                right: 0,
+                width: 340,
+                maxHeight: 420,
+                overflowY: "auto",
+                background: "#fff",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                borderRadius: 8,
+                zIndex: 200,
+                padding: 8
+              }}>
+                {conversations.length === 0 ? (
+                  <div style={{ padding: 14 }}>No unread messages</div>
+                ) : conversations.map((conv, idx) => (
+                  <div key={conv.chatId || idx}
+                       onClick={() => handleOpenConversation(conv, idx)}
+                       style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                    <img src={conv.profile || "/default-profile.png"} alt={conv.displayName} style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover" }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong>{conv.displayName}</strong>
+                        {conv.unreadForMe > 0 && (
+                          <span style={{ background: "#0b78f6", color: "#fff", padding: '2px 8px', borderRadius: 999, fontSize: 12 }}>
+                            {conv.unreadForMe}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#444", marginTop: 4 }}>{conv.lastMessageText || "No messages yet"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="icon-circle" onClick={() => navigate("/settings")}><FaCog /></div>
 
-          <img src={teacher.profileImage || "/default-profile.png"} alt="teacher" className="profile-img" />
+          <img src={t.profileImage || "/default-profile.png"} alt="teacher" className="profile-img" />
         </div>
       </nav>
 
@@ -353,10 +423,10 @@ export default function Dashboard() {
         <div className="google-sidebar">
           <div className="sidebar-profile">
             <div className="sidebar-img-circle">
-              <img src={teacher.profileImage || "/default-profile.png"} alt="profile" style={{ objectFit: "cover" }} />
+              <img src={t.profileImage || "/default-profile.png"} alt="profile" style={{ objectFit: "cover" }} />
             </div>
-            <h3>{teacher.name}</h3>
-            <p>{teacher.username}</p>
+            <h3>{t.name || "—"}</h3>
+            <p>{t.username || "—"}</p>
           </div>
 
           <div className="sidebar-menu">
@@ -367,7 +437,7 @@ export default function Dashboard() {
             <Link className="sidebar-btn" to="/marks"><FaClipboardCheck /> Marks</Link>
             <Link className="sidebar-btn" to="/attendance"><FaUsers /> Attendance</Link>
             <Link className="sidebar-btn" to="/schedule"><FaUsers /> Schedule</Link>
-            <Link className="sidebar-btn" to="/settings"><FaCog /> Settings</Link>
+
             <button className="sidebar-btn logout-btn" onClick={handleLogout}><FaSignOutAlt /> Logout</button>
           </div>
         </div>
@@ -375,7 +445,6 @@ export default function Dashboard() {
         <div className="google-main">
           <div className="posts-container">
             {posts.length === 0 && <p>No posts available</p>}
-
             {posts.map((post) => (
               <div
                 key={post.postId}
@@ -404,8 +473,8 @@ export default function Dashboard() {
                 {post.postUrl && <img src={post.postUrl} alt="post media" className="post-media" style={{ width: "100%", borderRadius: 8, marginTop: 8 }} />}
 
                 <div className="like-button" style={{ marginTop: 12 }}>
-                  <button onClick={() => handleLikePost(post.postId)} className="admin-like-btn" style={{ color: (post.likes || []).includes(teacher.userId) ? "#e0245e" : "#555" }}>
-                    <span className="like-left">{(post.likes || []).includes(teacher.userId) ? <FaHeart /> : <FaRegHeart />} &nbsp; {(post.likes || []).includes(teacher.userId) ? "Liked" : "Like"}</span>
+                  <button onClick={() => handleLikePost(post.postId)} className="admin-like-btn" style={{ color: (post.likes || []).includes(teacher?.userId) ? "#e0245e" : "#555" }}>
+                    <span className="like-left">{(post.likes || []).includes(teacher?.userId) ? <FaHeart /> : <FaRegHeart />} &nbsp; {(post.likes || []).includes(teacher?.userId) ? "Liked" : "Like"}</span>
                     <span className="like-count" style={{ marginLeft: 8 }}>{post.likeCount || 0}</span>
                   </button>
                 </div>

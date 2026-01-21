@@ -18,6 +18,9 @@ import {
 } from "react-icons/fa";
 import "../styles/global.css";
 
+const API_BASE = "http://127.0.0.1:5000/api";
+const RTDB_BASE = "https://ethiostore-17d9f-default-rtdb.firebaseio.com";
+
 export default function MarksPage() {
   const [teacher, setTeacher] = useState(null);
   const [courses, setCourses] = useState([]);
@@ -27,8 +30,16 @@ export default function MarksPage() {
   const [studentMarks, setStudentMarks] = useState({});
   const [structureSubmitted, setStructureSubmitted] = useState(false);
   const [activeSemester, setActiveSemester] = useState("semester2"); // default
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [highlightedPostId, setHighlightedPostId] = useState(null);
 
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Messenger state (Dashboard-like)
+  const [showMessenger, setShowMessenger] = useState(false);
+  const [conversations, setConversations] = useState([]);
 
   // ---------------- LOAD TEACHER ----------------
   useEffect(() => {
@@ -42,56 +53,60 @@ export default function MarksPage() {
 
   const teacherUserId = teacher?.userId;
 
-
-useEffect(() => {
-  if (!selectedCourseId) return;
-
-  const loadCourseData = async () => {
-    try {
-      const marksRes = await axios.get(
-        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}.json`
-      );
-
-      const course = courses.find((c) => c.id === selectedCourseId);
-      if (!course) return;
-
-      const filteredStudents = students.filter(
-        (s) => s.grade === course.grade && s.section === course.section
-      );
-
-      const initMarks = {};
-      let assessmentListFromDB = [];
-
-      filteredStudents.forEach((s) => {
-        const semData = marksRes.data?.[s.id]?.[activeSemester];
-
-        if (semData?.assessments) {
-          initMarks[s.id] = semData.assessments;
-
-          if (!assessmentListFromDB.length) {
-            assessmentListFromDB = Object.values(semData.assessments);
-          }
-        } else {
-          initMarks[s.id] = {};
-        }
-      });
-
-      setStudentMarks(initMarks);
-      setAssessmentList(
-        assessmentListFromDB.map((a) => ({ name: a.name, max: a.max }))
-      );
-      setStructureSubmitted(assessmentListFromDB.length > 0);
-    } catch (err) {
-      console.error("Error loading marks:", err);
-      setStructureSubmitted(false);
-      setStudentMarks({});
+  useEffect(() => {
+    if (teacher) {
+      fetchConversations(teacher);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teacher]);
 
-  loadCourseData();
-}, [selectedCourseId, courses, students, activeSemester]);
+  useEffect(() => {
+    if (!selectedCourseId) return;
 
+    const loadCourseData = async () => {
+      try {
+        const marksRes = await axios.get(
+          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}.json`
+        );
 
+        const course = courses.find((c) => c.id === selectedCourseId);
+        if (!course) return;
+
+        const filteredStudents = students.filter(
+          (s) => s.grade === course.grade && s.section === course.section
+        );
+
+        const initMarks = {};
+        let assessmentListFromDB = [];
+
+        filteredStudents.forEach((s) => {
+          const semData = marksRes.data?.[s.id]?.[activeSemester];
+
+          if (semData?.assessments) {
+            initMarks[s.id] = semData.assessments;
+
+            if (!assessmentListFromDB.length) {
+              assessmentListFromDB = Object.values(semData.assessments);
+            }
+          } else {
+            initMarks[s.id] = {};
+          }
+        });
+
+        setStudentMarks(initMarks);
+        setAssessmentList(
+          assessmentListFromDB.map((a) => ({ name: a.name, max: a.max }))
+        );
+        setStructureSubmitted(assessmentListFromDB.length > 0);
+      } catch (err) {
+        console.error("Error loading marks:", err);
+        setStructureSubmitted(false);
+        setStudentMarks({});
+      }
+    };
+
+    loadCourseData();
+  }, [selectedCourseId, courses, students, activeSemester]);
 
   // ---------------- FETCH COURSES ----------------
   useEffect(() => {
@@ -100,15 +115,9 @@ useEffect(() => {
     const fetchCourses = async () => {
       try {
         const [assignmentsRes, coursesRes, teachersRes] = await Promise.all([
-          axios.get(
-            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/TeacherAssignments.json"
-          ),
-          axios.get(
-            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Courses.json"
-          ),
-          axios.get(
-            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Teachers.json"
-          ),
+          axios.get(`${RTDB_BASE}/TeacherAssignments.json`),
+          axios.get(`${RTDB_BASE}/Courses.json`),
+          axios.get(`${RTDB_BASE}/Teachers.json`),
         ]);
 
         const teacherEntry = Object.entries(teachersRes.data || {}).find(
@@ -141,12 +150,8 @@ useEffect(() => {
     const fetchStudents = async () => {
       try {
         const [studentsRes, usersRes] = await Promise.all([
-          axios.get(
-            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Students.json"
-          ),
-          axios.get(
-            "https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"
-          ),
+          axios.get(`${RTDB_BASE}/Students.json`),
+          axios.get(`${RTDB_BASE}/Users.json`),
         ]);
 
         const studentsData = studentsRes.data || {};
@@ -189,54 +194,53 @@ useEffect(() => {
 
   // ---------------- SUBMIT STRUCTURE ----------------
   const submitStructure = async () => {
-  if (assessmentList.reduce((sum, a) => sum + Number(a.max || 0), 0) !== 100) {
-    alert("Total MAX must be exactly 100");
-    return;
-  }
+    if (assessmentList.reduce((sum, a) => sum + Number(a.max || 0), 0) !== 100) {
+      alert("Total MAX must be exactly 100");
+      return;
+    }
 
-  const structureObj = {};
-  assessmentList.forEach((a, idx) => {
-    structureObj[`a${idx + 1}`] = {
-      name: a.name,
-      max: Number(a.max),
-      score: 0,
-    };
-  });
-
-  try {
-    const course = courses.find((c) => c.id === selectedCourseId);
-    if (!course) return;
-
-    const filteredStudents = students.filter(
-      (s) => s.grade === course.grade && s.section === course.section
-    );
-
-    await Promise.all(
-      filteredStudents.map((s) =>
-        axios.put(
-          `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}/${s.id}/${activeSemester}.json`,
-          {
-            teacherName: teacher.name,
-            assessments: structureObj,
-          }
-        )
-      )
-    );
-
-    const initMarks = {};
-    filteredStudents.forEach((s) => {
-      initMarks[s.id] = structureObj;
+    const structureObj = {};
+    assessmentList.forEach((a, idx) => {
+      structureObj[`a${idx + 1}`] = {
+        name: a.name,
+        max: Number(a.max),
+        score: 0,
+      };
     });
 
-    setStudentMarks(initMarks);
-    setStructureSubmitted(true);
-    alert("Assessment structure saved!");
-  } catch (err) {
-    console.error("Error submitting structure:", err);
-    alert("Failed to submit structure");
-  }
-};
+    try {
+      const course = courses.find((c) => c.id === selectedCourseId);
+      if (!course) return;
 
+      const filteredStudents = students.filter(
+        (s) => s.grade === course.grade && s.section === course.section
+      );
+
+      await Promise.all(
+        filteredStudents.map((s) =>
+          axios.put(
+            `${RTDB_BASE}/ClassMarks/${selectedCourseId}/${s.id}/${activeSemester}.json`,
+            {
+              teacherName: teacher.name,
+              assessments: structureObj,
+            }
+          )
+        )
+      );
+
+      const initMarks = {};
+      filteredStudents.forEach((s) => {
+        initMarks[s.id] = structureObj;
+      });
+
+      setStudentMarks(initMarks);
+      setStructureSubmitted(true);
+      alert("Assessment structure saved!");
+    } catch (err) {
+      console.error("Error submitting structure:", err);
+      alert("Failed to submit structure");
+    }
+  };
 
   const updateScore = (sid, key, value) => {
     setStudentMarks((p) => ({
@@ -245,27 +249,197 @@ useEffect(() => {
     }));
   };
 
- const saveMarks = async (sid) => {
-  try {
-    await axios.put(
-      `https://ethiostore-17d9f-default-rtdb.firebaseio.com/ClassMarks/${selectedCourseId}/${sid}/${activeSemester}.json`,
-      {
-        teacherName: teacher.name,
-        assessments: studentMarks[sid],
-      }
-    );
-    alert("Marks saved successfully");
-  } catch (err) {
-    console.error("Save failed:", err);
-    alert("Failed to save marks");
-  }
-};
-
+  const saveMarks = async (sid) => {
+    try {
+      await axios.put(
+        `${RTDB_BASE}/ClassMarks/${selectedCourseId}/${sid}/${activeSemester}.json`,
+        {
+          teacherName: teacher.name,
+          assessments: studentMarks[sid],
+        }
+      );
+      alert("Marks saved successfully");
+    } catch (err) {
+      console.error("Save failed:", err);
+      alert("Failed to save marks");
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("teacher");
     navigate("/login");
   };
+
+  // ---------------- FETCH NOTIFICATIONS (ENRICHED WITH ADMIN INFO) ----------------
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/get_posts`);
+        let postsData = res.data || [];
+
+        if (!Array.isArray(postsData) && typeof postsData === "object") {
+          postsData = Object.values(postsData);
+        }
+
+        const [adminsRes, usersRes] = await Promise.all([
+          axios.get(`${RTDB_BASE}/School_Admins.json`),
+          axios.get(`${RTDB_BASE}/Users.json`),
+        ]);
+        const schoolAdmins = adminsRes.data || {};
+        const users = usersRes.data || {};
+
+        const usersByKey = { ...users };
+        const usersByUserId = {};
+        Object.values(users).forEach((u) => {
+          if (u && u.userId) usersByUserId[u.userId] = u;
+        });
+
+        const resolveAdminInfo = (post) => {
+          const adminId = post.adminId || post.posterAdminId || post.poster || post.admin || null;
+          if (adminId && schoolAdmins[adminId]) {
+            const schoolAdminRec = schoolAdmins[adminId];
+            const userKey = schoolAdminRec.userId;
+            const userRec = usersByKey[userKey] || usersByUserId[userKey] || null;
+            const name = (userRec && userRec.name) || schoolAdminRec.name || schoolAdminRec.username || post.adminName || "Admin";
+            const profile = (userRec && (userRec.profileImage || userRec.profile)) || schoolAdminRec.profileImage || post.adminProfile || "/default-profile.png";
+            return { name, profile };
+          }
+          if (adminId && usersByKey[adminId]) {
+            const userRec = usersByKey[adminId];
+            return { name: userRec.name || userRec.username || post.adminName || "Admin", profile: userRec.profileImage || post.adminProfile || "/default-profile.png" };
+          }
+          if (adminId && usersByUserId[adminId]) {
+            const userRec = usersByUserId[adminId];
+            return { name: userRec.name || userRec.username || post.adminName || "Admin", profile: userRec.profileImage || post.adminProfile || "/default-profile.png" };
+          }
+          return { name: post.adminName || post.name || post.username || "Admin", profile: post.adminProfile || post.profileImage || "/default-profile.png" };
+        };
+
+        const latest = postsData
+          .slice()
+          .sort((a, b) => {
+            const ta = a.time ? new Date(a.time).getTime() : a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tb = b.time ? new Date(b.time).getTime() : b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return tb - ta;
+          })
+          .slice(0, 5)
+          .map((post) => {
+            const info = resolveAdminInfo(post);
+            return {
+              id: post.postId || post.id || null,
+              title: post.message?.substring(0, 50) || "Untitled post",
+              adminName: info.name,
+              adminProfile: info.profile,
+            };
+          });
+
+        setNotifications(latest);
+      } catch (err) {
+        console.error("Error fetching notifications:", err);
+      }
+    };
+
+    fetchNotifications();
+  }, []);
+
+  // ---------------- MESSENGER: same behavior as Dashboard ----------------
+  const fetchConversations = async (currentTeacher = teacher) => {
+    try {
+      const t = currentTeacher || JSON.parse(localStorage.getItem("teacher"));
+      if (!t || !t.userId) {
+        setConversations([]);
+        return;
+      }
+
+      const [chatsRes, usersRes] = await Promise.all([axios.get(`${RTDB_BASE}/Chats.json`), axios.get(`${RTDB_BASE}/Users.json`)]);
+      const chats = chatsRes.data || {};
+      const users = usersRes.data || {};
+
+      // build maps
+      const usersByKey = users || {};
+      const userKeyByUserId = {};
+      Object.entries(usersByKey).forEach(([pushKey, u]) => {
+        if (u && u.userId) userKeyByUserId[u.userId] = pushKey;
+      });
+
+      const convs = Object.entries(chats)
+        .map(([chatId, chat]) => {
+          const unreadMap = chat.unread || {};
+          const unreadForMe = unreadMap[t.userId] || 0;
+          if (!unreadForMe) return null;
+          const participants = chat.participants || {};
+          const otherKeyCandidate = Object.keys(participants || {}).find((p) => p !== t.userId);
+          if (!otherKeyCandidate) return null;
+
+          let otherPushKey = otherKeyCandidate;
+          let otherRecord = usersByKey[otherPushKey];
+
+          if (!otherRecord) {
+            const mapped = userKeyByUserId[otherKeyCandidate];
+            if (mapped) {
+              otherPushKey = mapped;
+              otherRecord = usersByKey[mapped];
+            }
+          }
+
+          if (!otherRecord) {
+            otherRecord = { userId: otherKeyCandidate, name: otherKeyCandidate, profileImage: "/default-profile.png" };
+          }
+
+          const contact = {
+            pushKey: otherPushKey,
+            userId: otherRecord.userId || otherKeyCandidate,
+            name: otherRecord.name || otherRecord.username || otherKeyCandidate,
+            profileImage: otherRecord.profileImage || otherRecord.profile || "/default-profile.png",
+          };
+
+          const lastMessage = chat.lastMessage || {};
+
+          return {
+            chatId,
+            contact,
+            displayName: contact.name,
+            profile: contact.profileImage,
+            lastMessageText: lastMessage.text || "",
+            lastMessageTime: lastMessage.timeStamp || lastMessage.time || null,
+            unreadForMe,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+      setConversations(convs);
+    } catch (err) {
+      console.error("Error fetching conversations:", err);
+      setConversations([]);
+    }
+  };
+
+  const handleMessengerToggle = async () => {
+    setShowMessenger((s) => !s);
+    await fetchConversations();
+  };
+
+  const handleOpenConversation = async (conv, index) => {
+    if (!teacher || !conv) return;
+    const { chatId, contact } = conv;
+
+    // navigate to AllChat with contact + chatId
+    navigate("/all-chat", { state: { contact, chatId, tab: "marks" } });
+
+    // clear unread in RTDB for this teacher
+    try {
+      await axios.put(`${RTDB_BASE}/Chats/${chatId}/unread/${teacher.userId}.json`, null);
+    } catch (err) {
+      console.error("Failed to clear unread in DB:", err);
+    }
+
+    // remove from local UI and close dropdown
+    setConversations((prev) => prev.filter((_, i) => i !== index));
+    setShowMessenger(false);
+  };
+
+  const totalUnreadMessages = conversations.reduce((sum, c) => sum + (c.unreadForMe || 0), 0);
 
   // ---------------- UI ----------------
   return (
@@ -278,15 +452,68 @@ useEffect(() => {
           <input type="text" placeholder="Search Teacher and Student..." />
         </div>
         <div className="nav-right">
-          <div className="icon-circle">
-            <FaBell />
+          <div className="icon-circle" style={{ position: "relative" }}>
+            <div onClick={() => setShowNotifications(!showNotifications)} style={{ cursor: "pointer", position: "relative" }}>
+              <FaBell size={24} />
+              {notifications.length > 0 && (
+                <span style={{ position: "absolute", top: -5, right: -5, background: "red", color: "white", borderRadius: "50%", width: 18, height: 18, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {notifications.length}
+                </span>
+              )}
+            </div>
+
+            {showNotifications && (
+              <div style={{ position: "absolute", top: 30, right: 0, width: 300, maxHeight: 400, overflowY: "auto", background: "#fff", boxShadow: "0 2px 10px rgba(0,0,0,0.2)", borderRadius: 8, zIndex: 100 }}>
+                {notifications.length > 0 ? notifications.map((post, index) => (
+                  <div key={post.id || index} onClick={() => {
+                    navigate("/dashboard");
+                    setTimeout(() => {
+                      // optional highlight logic if your dashboard exposes post refs
+                      setHighlightedPostId(post.id);
+                      setTimeout(() => setHighlightedPostId(null), 3000);
+                    }, 150);
+                    setNotifications(prev => prev.filter((_, i) => i !== index));
+                    setShowNotifications(false);
+                  }} style={{ display: "flex", alignItems: "center", padding: "10px 15px", borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                    <img src={post.adminProfile} alt={post.adminName} style={{ width: 35, height: 35, borderRadius: "50%", marginRight: 10 }} />
+                    <div><strong>{post.adminName}</strong><p style={{ margin: 0, fontSize: 12 }}>{post.title}</p></div>
+                  </div>
+                )) : <div style={{ padding: 15 }}>No notifications</div>}
+              </div>
+            )}
           </div>
-          <div className="icon-circle">
-            <FaFacebookMessenger />
+
+          {/* Messenger (same as Dashboard) */}
+          <div className="icon-circle" style={{ position: "relative", marginLeft: 12 }}>
+            <div onClick={handleMessengerToggle} style={{ cursor: "pointer", position: "relative" }}>
+              <FaFacebookMessenger size={22} />
+              {totalUnreadMessages > 0 && (
+                <span style={{ position: "absolute", top: -6, right: -6, background: "#0b78f6", color: "#fff", borderRadius: "50%", minWidth: 18, height: 18, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px" }}>
+                  {totalUnreadMessages}
+                </span>
+              )}
+            </div>
+
+            {showMessenger && (
+              <div style={{ position: "absolute", top: 34, right: 0, width: 340, maxHeight: 420, overflowY: "auto", background: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", borderRadius: 8, zIndex: 200, padding: 8 }}>
+                {conversations.length === 0 ? (
+                  <div style={{ padding: 14 }}>No unread messages</div>
+                ) : conversations.map((conv, idx) => (
+                  <div key={conv.chatId || idx} onClick={() => handleOpenConversation(conv, idx)} style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                    <img src={conv.profile || "/default-profile.png"} alt={conv.displayName} style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover" }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong>{conv.displayName}</strong>
+                        {conv.unreadForMe > 0 && <span style={{ background: "#0b78f6", color: "#fff", padding: '2px 8px', borderRadius: 999, fontSize: 12 }}>{conv.unreadForMe}</span>}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#444", marginTop: 4 }}>{conv.lastMessageText || "No messages yet"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="icon-circle">
-            <FaCog />
-          </div>
+            <div className="icon-circle" onClick={() => navigate("/settings")}><FaCog /></div>
           <img src={teacher?.profileImage || "/default-profile.png"} alt="profile" />
         </div>
       </nav>
@@ -331,9 +558,7 @@ useEffect(() => {
             <Link className="sidebar-btn" to="/schedule" >
                                              <FaUsers /> Schedule
                                            </Link>
-            <Link className="sidebar-btn" to="/settings">
-              <FaCog /> Settings
-            </Link>
+            
             <button className="sidebar-btn logout-btn" onClick={handleLogout}>
               <FaSignOutAlt /> Logout
             </button>

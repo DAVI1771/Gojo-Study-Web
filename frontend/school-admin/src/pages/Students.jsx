@@ -37,7 +37,7 @@ function StudentsPage() {
   const [attendanceView, setAttendanceView] = useState("daily");
   const [attendanceCourseFilter, setAttendanceCourseFilter] = useState("All");
   const [expandedCards, setExpandedCards] = useState({});
-
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false); // Right sidebar toggle
   const [teachers, setTeachers] = useState([]);
   const [unreadTeachers, setUnreadTeachers] = useState({});
   const [unreadSenders, setUnreadSenders] = useState([]); 
@@ -57,7 +57,7 @@ function StudentsPage() {
   const adminId = admin.userId;
   const adminUserId = admin.userId;
 
-  const db = getDatabase(app);
+  const dbRT = getDatabase(app);
 
 const fetchPostNotifications = async () => {
   if (!adminId) return;
@@ -275,12 +275,40 @@ useEffect(() => {
         attendance: attendanceData,
       });
 
+
+   setRightSidebarOpen(true);
     } catch (err) {
       console.error("Error fetching student data:", err);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
+
+ // New: close the right sidebar (keeps selectedStudent in state so it can be reopened)
+  const closeRightSidebar = () => {
+    setRightSidebarOpen(false);
+  };
+
+  // Optional: function to toggle sidebar (can be used by a "Show sidebar" button)
+  const openRightSidebar = () => {
+    if (selectedStudent) setRightSidebarOpen(true);
+  };
+
+  // close dropdowns outside click - unchanged logic retained
+  useEffect(() => {
+    const closeDropdown = (e) => {
+      if (!e.target.closest(".icon-circle") && !e.target.closest(".messenger-dropdown")) {
+        setShowMessageDropdown(false);
+      }
+      if (!e.target.closest(".icon-circle") && !e.target.closest(".notification-dropdown")) {
+        setShowPostDropdown(false);
+      }
+    };
+    document.addEventListener("click", closeDropdown);
+    return () => document.removeEventListener("click", closeDropdown);
+  }, []);
+
+
 
   useEffect(() => {
     const fetchTeachersAndUnread = async () => {
@@ -777,224 +805,62 @@ useEffect(() => {
   };
 
 
-  return (
-    <div className="dashboard-page">
 
+
+
+ return (
+    <div className="dashboard-page">
       {/* ---------------- TOP NAVIGATION BAR ---------------- */}
       <nav className="top-navbar">
         <h2>Gojo Dashboard</h2>
-        <div className="nav-search">
-          <FaSearch className="search-icon" />
-          <input type="text" placeholder="Search Teacher and Student..." />
-        </div>
+        
         <div className="nav-right">
-          <div
-            className="icon-circle"
-            style={{ position: "relative", cursor: "pointer" }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowPostDropdown(prev => !prev);
-            }}
-          >
+          <div className="icon-circle" style={{ position: "relative", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setShowPostDropdown(prev => !prev); }}>
             <FaBell />
-
-            {/* 🔴 Notification Count */}
-            {postNotifications.length > 0 && (
-              <span
-                style={{
-                  position: "absolute",
-                  top: "-5px",
-                  right: "-5px",
-                  background: "red",
-                  color: "#fff",
-                  borderRadius: "50%",
-                  padding: "2px 6px",
-                  fontSize: "10px",
-                  fontWeight: "bold"
-                }}
-              >
-                {postNotifications.length}
-              </span>
-            )}
-
-            {/* 🔔 Notification Dropdown */}
+            {postNotifications.length > 0 && <span className="badge">{postNotifications.length}</span>}
             {showPostDropdown && (
-              <div
-                className="notification-dropdown"
-                style={{
-                  position: "absolute",
-                  top: "40px",
-                  right: "0",
-                  width: "350px",
-                  maxHeight: "400px",
-                  overflowY: "auto",
-                  background: "#fff",
-                  borderRadius: "10px",
-                  boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
-                  zIndex: 1000
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {postNotifications.length === 0 ? (
-                  <p style={{ padding: "12px", textAlign: "center" }}>
-                    No new notifications
-                  </p>
-                ) : (
+              <div className="notification-dropdown" onClick={(e) => e.stopPropagation()}>
+                {postNotifications.length === 0 ? <p style={{ padding: 12, textAlign: "center" }}>No new notifications</p> :
                   postNotifications.map(n => (
-                    <div
-                      key={n.notificationId}
-                      style={{
-                        display: "flex",
-                        gap: "10px",
-                        padding: "10px",
-                        cursor: "pointer",
-                        borderBottom: "1px solid #eee"
-                      }}
-                      onClick={() => handleNotificationClick(n)}
-                    >
-                      <img
-                        src={n.adminProfile || "/default-profile.png"}
-                        alt={n.adminName}
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          borderRadius: "50%"
-                        }}
-                      />
+                    <div key={n.notificationId} style={{ display: "flex", gap: 10, padding: 10, cursor: "pointer", borderBottom: "1px solid #eee" }} onClick={() => handleNotificationClick(n)}>
+                      <img src={n.adminProfile || "/default-profile.png"} alt={n.adminName} style={{ width: 40, height: 40, borderRadius: "50%" }} />
                       <div>
                         <strong>{n.adminName}</strong>
                         <p style={{ margin: 0 }}>{n.message}</p>
                       </div>
                     </div>
                   ))
-                )}
+                }
               </div>
             )}
           </div>
 
-    {/* ================= MESSENGER ================= */}
-    <div
-      className="icon-circle"
-      style={{ position: "relative", cursor: "pointer" }}
-      onClick={(e) => {
-        e.stopPropagation();
-        setShowMessageDropdown((prev) => !prev);
-      }}
-    >
-      <FaFacebookMessenger />
-    
-      {/* 🔴 TOTAL UNREAD COUNT */}
-      {Object.keys(unreadSenders).length > 0 && (
-        <span
-          style={{
-            position: "absolute",
-            top: "-5px",
-            right: "-5px",
-            background: "red",
-            color: "#fff",
-            borderRadius: "50%",
-            padding: "2px 6px",
-            fontSize: "10px",
-            fontWeight: "bold"
-          }}
-        >
-          {Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}
-        </span>
-      )}
-    
-      {/* 📩 DROPDOWN */}
-      {showMessageDropdown && (
-        <div
-          style={{
-            position: "absolute",
-            top: "40px",
-            right: "0",
-            width: "300px",
-            background: "#fff",
-            borderRadius: "10px",
-            boxShadow: "0 4px 15px rgba(0,0,0,0.25)",
-            zIndex: 1000
-          }}
-        >
-          {Object.keys(unreadSenders).length === 0 ? (
-            <p style={{ padding: "12px", textAlign: "center", color: "#777" }}>
-              No new messages
-            </p>
-          ) : (
-            Object.entries(unreadSenders).map(([userId, sender]) => (
-              <div
-                key={userId}
-                style={{
-                  padding: "12px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  cursor: "pointer",
-                  borderBottom: "1px solid #eee"
-                }}
-              onClick={async () => {
-  setShowMessageDropdown(false);
-
-  // 1️⃣ Mark messages as seen in DB
-  await markMessagesAsSeen(userId);
-
-  // 2️⃣ Remove sender immediately from UI
-  setUnreadSenders(prev => {
-    const copy = { ...prev };
-    delete copy[userId];
-    return copy;
-  });
-
-  // 3️⃣ Navigate to exact chat
-  navigate("/all-chat", {
-    state: {
-      user: {
-        userId,
-        name: sender.name,
-        profileImage: sender.profileImage,
-        type: sender.type
-      }
-    }
-  });
-}}
-
-    
-    
-              >
-                <img
-                  src={sender.profileImage}
-                  alt={sender.name}
-                  style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%"
-                  }}
-                />
-                <div>
-                  <strong>{sender.name}</strong>
-                  <p style={{ fontSize: "12px", margin: 0 }}>
-                    {sender.count} new message{sender.count > 1 && "s"}
-                  </p>
-                </div>
+          <div className="icon-circle" style={{ position: "relative", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setShowMessageDropdown(prev => !prev); }}>
+            <FaFacebookMessenger />
+            {Object.keys(unreadSenders).length > 0 && <span className="badge">{Object.values(unreadSenders).reduce((a, b) => a + b.count, 0)}</span>}
+            {showMessageDropdown && (
+              <div className="notification-dropdown messenger-dropdown" onClick={(e) => e.stopPropagation()}>
+                {Object.keys(unreadSenders).length === 0 ? <p style={{ padding: 12, textAlign: "center" }}>No new messages</p> :
+                  Object.entries(unreadSenders).map(([userId, sender]) => (
+                    <div key={userId} style={{ padding: 12, display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderBottom: "1px solid #eee" }} onClick={async () => { setShowMessageDropdown(false); await markMessagesAsSeen(userId); navigate("/all-chat", { state: { user: { userId, name: sender.name, profileImage: sender.profileImage, type: sender.type } } }); }}>
+                      <img src={sender.profileImage} alt={sender.name} style={{ width: 42, height: 42, borderRadius: "50%" }} />
+                      <div>
+                        <strong>{sender.name}</strong>
+                        <p style={{ fontSize: 12, margin: 0 }}>{sender.count} new message{sender.count > 1 && "s"}</p>
+                      </div>
+                    </div>
+                  ))
+                }
               </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-    {/* ============== END MESSENGER ============== */}
-    
+            )}
+          </div>
 
-           <Link className="icon-circle" to="/settings">
-                           <FaCog />
-                         </Link>
+          <Link className="icon-circle" to="/settings"><FaCog /></Link>
           <img src={admin.profileImage || "/default-profile.png"} alt="admin" className="profile-img" />
         </div>
       </nav>
 
-      {/* ---------------- DASHBOARD LAYOUT ---------------- */}
       <div className="google-dashboard" style={{ display: "flex" }}>
-
         {/* ---------------- SIDEBAR ---------------- */}
         <div className="google-sidebar">
           <div className="sidebar-profile">
@@ -1006,178 +872,124 @@ useEffect(() => {
           </div>
 
           <div className="sidebar-menu">
-                     <Link className="sidebar-btn" to="/dashboard"
-                      
-                      > <FaHome style={{ width: "28px", height:"28px" }}/> Home</Link>
-                       <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
-                       <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
-                         <Link className="sidebar-btn" to="/students" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}> <FaChalkboardTeacher /> Students</Link>
-                          <Link
-                                       className="sidebar-btn"
-                                       to="/schedule"
-                                       
-                                     >
-                                       <FaCalendarAlt /> Schedule
-                                     </Link>
-                          <Link className="sidebar-btn" to="/parents" ><FaChalkboardTeacher /> Parents
-                                     </Link>
-                                               
-                   
-                       <button
-                         className="sidebar-btn logout-btn"
-                         onClick={() => {
-                           localStorage.removeItem("admin");
-                           window.location.href = "/login";
-                         }}
-                       >
-                         <FaSignOutAlt /> Logout
-                       </button>
-                     </div>
+            <Link className="sidebar-btn" to="/dashboard"> <FaHome style={{ width: "28px", height:"28px" }}/> Home</Link>
+            <Link className="sidebar-btn" to="/my-posts"><FaFileAlt /> My Posts</Link>
+            <Link className="sidebar-btn" to="/teachers"><FaChalkboardTeacher /> Teachers</Link>
+            <Link className="sidebar-btn" to="/students" style={{ backgroundColor: "#4b6cb7", color: "#fff" }}><FaChalkboardTeacher /> Students</Link>
+            <Link className="sidebar-btn" to="/schedule"><FaCalendarAlt /> Schedule</Link>
+            <Link className="sidebar-btn" to="/parents"><FaChalkboardTeacher /> Parents</Link>
+            <button className="sidebar-btn logout-btn" onClick={() => { localStorage.removeItem("admin"); window.location.href = "/login"; }}><FaSignOutAlt /> Logout</button>
+          </div>
         </div>
 
         {/* ---------------- MAIN CONTENT ---------------- */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
-          <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Students</h2>
+        <div className={`main-content ${rightSidebarOpen ? "sidebar-open" : ""}`}>
+          <div className="main-inner" style={{ marginLeft: "150px", marginTop: "-80px" }}>
+            <h2 style={{ marginBottom: "20px", textAlign: "center" }}>Students</h2>
 
-          {/* Grade Filter */}
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px" }}>
-            {["All", "9", "10", "11", "12"].map(g => (
-              <button key={g} onClick={() => setSelectedGrade(g)} style={{
-                padding: "10px 20px",
-                borderRadius: "8px",
-                background: selectedGrade === g ? "#4b6cb7" : "#ddd",
-                color: selectedGrade === g ? "#fff" : "#000",
-                cursor: "pointer",
-                border: "none",
-              }}>
-                {g === "All" ? "All Grades" : `Grade ${g}`}
-              </button>
-            ))}
-          </div>
-
-          {/* Section Filter */}
-          {selectedGrade !== "All" && sections.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px", }}>
-              {["All", ...sections].map(section => (
-                <button key={section} onClick={() => setSelectedSection(section)} style={{
-                  padding: "8px 16px",
+            {/* Grade Filter */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px" }}>
+              {["All", "9", "10", "11", "12"].map(g => (
+                <button key={g} onClick={() => setSelectedGrade(g)} style={{
+                  padding: "10px 20px",
                   borderRadius: "8px",
-                  background: selectedSection === section ? "#4b6cb7" : "#ddd",
-                  color: selectedSection === section ? "#fff" : "#000",
+                  background: selectedGrade === g ? "#4b6cb7" : "#ddd",
+                  color: selectedGrade === g ? "#fff" : "#000",
                   cursor: "pointer",
                   border: "none",
                 }}>
-                  {section === "All" ? "All Sections" : `Section ${section}`}
+                  {g === "All" ? "All Grades" : `Grade ${g}`}
                 </button>
               ))}
             </div>
-          )}
 
-          {/* Students List */}
-          {filteredStudents.length === 0 ? (
-            <p style={{ textAlign: "center", color: "#555" }}>No students found for this selection.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
-             {filteredStudents.map(s => (
-  <div
-    key={s.userId}
-    onClick={() => handleSelectStudent(s)}
-    style={{
-      width: "700px",
-      height: "100px",
-      borderRadius: "12px",
-      padding: "15px",
-      background: selectedStudent?.studentId === s.studentId ? "#e0e7ff" : "#fff",
-      border: selectedStudent?.studentId === s.studentId ? "2px solid #4b6cb7" : "1px solid #ddd",
-      display: "flex",
-      alignItems: "center",
-      gap: "20px",
-      cursor: "pointer"
-    }}
-  >
-    <img src={s.profileImage} alt={s.name} style={{ width: "50px", height: "50px", borderRadius: "50%", objectFit: "cover" }} />
-    <div>
-      <h3 style={{ margin: 0 }}>{s.name}</h3>
-      <p style={{ margin: "4px 0", color: "#555" }}>Grade {s.grade} - Section {s.section}</p>
-    </div>
-  </div>
-))}
+            {/* Section Filter */}
+            {selectedGrade !== "All" && sections.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "25px", gap: "12px", }}>
+                {["All", ...sections].map(section => (
+                  <button key={section} onClick={() => setSelectedSection(section)} style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    background: selectedSection === section ? "#4b6cb7" : "#ddd",
+                    color: selectedSection === section ? "#fff" : "#000",
+                    cursor: "pointer",
+                    border: "none",
+                  }}>
+                    {section === "All" ? "All Sections" : `Section ${section}`}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            </div>
-          )}
+            {/* Students List */}
+            {filteredStudents.length === 0 ? (
+              <p style={{ textAlign: "center", color: "#555" }}>No students found for this selection.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
+                {filteredStudents.map(s => (
+                  <div
+                    key={s.userId}
+                    onClick={() => handleSelectStudent(s)}
+                    className="student-card"
+                    style={{
+                      width: "700px",
+                      height: "100px",
+                      borderRadius: "12px",
+                      padding: "15px",
+                      background: selectedStudent?.studentId === s.studentId ? "#e0e7ff" : "#fff",
+                      border: selectedStudent?.studentId === s.studentId ? "2px solid #4b6cb7" : "1px solid #ddd",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "20px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <img src={s.profileImage} alt={s.name} style={{ width: "50px", height: "50px", borderRadius: "50%", objectFit: "cover" }} />
+                    <div>
+                      <h3 style={{ margin: 0 }}>{s.name}</h3>
+                      <p style={{ margin: "4px 0", color: "#555" }}>Grade {s.grade} - Section {s.section}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ---------------- RIGHT SIDEBAR FOR SELECTED STUDENT ---------------- */}
-       {/* ---------------- RIGHT SIDEBAR FOR SELECTED STUDENT ---------------- */}
-{selectedStudent && (
-  <div style={{
-    width: "30%",
-    height: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    position: "fixed",
-    right: 0,
-    top: 0,
-    background: "#fff",
-    boxShadow: "0 0 15px rgba(0,0,0,0.05)",
-    zIndex: 10
-  }}>
-    {/* Scrollable content */}
-    <div style={{ overflowY: "auto", padding: "25px", flex: 1 }}>
-      {/* Student Info */}
-      <div style={{ textAlign: "center", marginBottom: "20px" }}>
-        <div style={{
-          background: "#becff7ff",
-          padding: "25px 10px",
-          height: "200px",
-          margin: "50px 1px 20px",
-          boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
-        }}>
-          <div style={{
-            width: "100px",
-            height: "100px",
-            margin: "-20px auto 15px",
-            borderRadius: "50%",
-            overflow: "hidden",
-            border: "4px solid #4b6cb7",
-            boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
-          }}>
-            <img src={selectedStudent.profileImage} alt={selectedStudent.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          </div>
-          <h2 style={{ margin: 0, fontSize: "22px", marginTop: "-10px", color: "#333" }}>{selectedStudent.name}</h2>
-          <h2 style={{ margin: 0, fontSize: "16px", color: "#585656ff" }}>{selectedStudent.email || "default.student@example.com"}</h2>
-        </div>
-        <p><strong>Grade:</strong> {selectedStudent.grade}</p>
-        <p><strong>Section:</strong> {selectedStudent.section}</p>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ marginBottom: "20px" }}>
-        <div style={{ display: "flex", marginBottom: "10px", borderBottom: "1px solid #eee" }}>
-          {["details", "attendance", "performance"].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setStudentTab(tab)}
-              style={{
-                flex: 1,
-                padding: "10px",
-                border: "none",
-                background: "none",
-                cursor: "pointer",
-                fontWeight: "600",
-                color: studentTab === tab ? "#4b6cb7" : "#777",
-                borderBottom: studentTab === tab ? "3px solid #4b6cb7" : "3px solid transparent",
-              }}
-            >
-              {tab.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <p style={{ textAlign: "center", color: "#888" }}>Loading...</p>
-        ) : (
+        {selectedStudent && (
           <>
+            <div className={`sidebar-overlay ${rightSidebarOpen ? "visible" : ""}`} onClick={closeRightSidebar} aria-hidden={!rightSidebarOpen} />
+            <aside className={`student-info-sidebar ${rightSidebarOpen ? "open" : "closed"}`} role="dialog" aria-label="Student details" >
+              <div className="student-info-header" style={{ position: "relative", marginTop: "-10px", padding: "2px" }}>
+                <button className="sidebar-close-btn" aria-label="Close details" onClick={closeRightSidebar}>✕</button>
+              </div>
+
+              <div className="student-info-scroll">
+                {/* student details content (kept same as your UI) */}
+                <div style={{ textAlign: "center", marginBottom: "20px", marginTop: "-90px" }}>
+                  <div style={{ background: "#e6eefc", padding: "25px 10px", height: "200px", margin: "50px 1px 20px", boxShadow: "0 4px 15px rgba(0,0,0,0.1)" }}>
+                    <div style={{ width: "110px", height: "110px", margin: "0 auto 15px", borderRadius: "50%", overflow: "hidden", border: "4px solid #4b6cb7" }}>
+                      <img src={selectedStudent.profileImage} alt={selectedStudent.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                    <h2 style={{ margin: 0, color: "#111827" }}>{selectedStudent.name}</h2>
+                    <p style={{ margin: "4px 0", color: "#6b7280", fontSize: "14px" }}>{selectedStudent.email || "teacher@example.com"}</p>
+                  </div>
+
+                  <p><strong>Grade:</strong> {selectedStudent.grade}</p>
+                  <p><strong>Section:</strong> {selectedStudent.section}</p>
+                </div>
+
+                <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", marginBottom: "15px" }}>
+                  {["details", "attendance", "performance"].map(tab => (
+                    <button key={tab} onClick={() => setStudentTab(tab)} style={{
+                      flex: 1, padding: "12px", background: "none", border: "none", cursor: "pointer", fontWeight: 600,
+                      color: studentTab === tab ? "#4b6cb7" : "#6b7280",
+                      borderBottom: studentTab === tab ? "3px solid #4b6cb7" : "3px solid transparent"
+                    }}>{tab.toUpperCase()}</button>
+                  ))}
+                </div>
+
             {/* DETAILS TAB */}
   {/* ================= DETAILS TAB ================= */}
 {studentTab === "details" && selectedStudent && (
@@ -1798,88 +1610,118 @@ useEffect(() => {
     </div>
   </div>
 )}
-          </>
-        )}
-      </div>
-    </div>
+         </div>
+
 
     {/* ---------------- MESSAGE BUTTON (rigid) ---------------- */}
-   {/* ================= FIXED MESSAGE BUTTON ================= */}
-   <div
-     onClick={() => setStudentChatOpen(true)}
-     style={{
-       position: "fixed",        // 🔒 RIGID
-       bottom: "20px",
-       right: "20px",
-       width: "48px",
-       height: "48px",
-       background:
-         "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
-       borderRadius: "50%",
-       display: "flex",
-       alignItems: "center",
-       justifyContent: "center",
-       color: "#fff",
-       cursor: "pointer",
-       zIndex: 9999,
-       boxShadow: "0 8px 18px rgba(0,0,0,0.25)",
-       transition: "transform 0.2s ease, box-shadow 0.2s ease",
-     }}
-     onMouseEnter={(e) => {
-       e.currentTarget.style.transform = "scale(1.08)";
-       e.currentTarget.style.boxShadow =
-         "0 12px 26px rgba(0,0,0,0.35)";
-     }}
-     onMouseLeave={(e) => {
-       e.currentTarget.style.transform = "scale(1)";
-       e.currentTarget.style.boxShadow =
-         "0 8px 18px rgba(0,0,0,0.25)";
-     }}
-   >
-     <FaCommentDots size={22} />
-   </div>
-   
+    <div
+      onClick={() => setStudentChatOpen(true)}
+      style={{
+        position: "fixed",
+        bottom: "20px",
+        right: "20px",
+        width: "48px",
+        height: "48px",
+        background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+        borderRadius: "50%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#fff",
+        cursor: "pointer",
+        zIndex: 9999,
+        boxShadow: "0 8px 18px rgba(0,0,0,0.25)",
+        transition: "transform 0.2s ease, box-shadow 0.2s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "scale(1.08)";
+        e.currentTarget.style.boxShadow = "0 12px 26px rgba(0,0,0,0.35)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "scale(1)";
+        e.currentTarget.style.boxShadow = "0 8px 18px rgba(0,0,0,0.25)";
+      }}
+    >
+      <FaCommentDots size={22} />
+    </div>
+
+   {/* ----- MESSAGE BUTTON & POPUP (always at same position) ----- */}
+{selectedStudent && !studentChatOpen && (
+  <div
+    onClick={() => setStudentChatOpen(true)}
+    style={{
+      position: "fixed",
+      bottom: "20px",
+      right: "20px",
+      width: "48px",
+      height: "48px",
+      background: "linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045)",
+      borderRadius: "50%",
+      display: "grid",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "#fff",
+      cursor: "pointer",
+      zIndex: 1000, // less than popup
+      boxShadow: "0 8px 18px rgba(0,0,0,0.25)",
+      transition: "transform 0.2s ease, box-shadow 0.2s ease",
+    }}
+    tabIndex={0}
+    aria-label="Open student chat"
+    onMouseEnter={e => {
+      e.currentTarget.style.transform = "scale(1.08)";
+      e.currentTarget.style.boxShadow = "0 12px 26px rgba(0,0,0,0.35)";
+    }}
+    onMouseLeave={e => {
+      e.currentTarget.style.transform = "scale(1)";
+      e.currentTarget.style.boxShadow = "0 8px 18px rgba(0,0,0,0.25)";
+    }}
+  >
+    <FaCommentDots size={22} />
   </div>
 )}
-{/* ================= STUDENT CHAT POPUP ================= */}
+
 {studentChatOpen && selectedStudent && (
-  <div style={{
-    position: "fixed",
-    bottom: "6px",
-    right: "22px",
-    width: "320px",
-    background: "#fff",
-    borderRadius: "12px",
-    boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
-    padding: "15px",
-    zIndex: 999,
-    animation: "fadeIn 0.3s ease"
-  }}>
+  <div
+    style={{
+      position: "fixed",
+      bottom: "12px",
+      right: "18px",
+      width: "340px",
+      background: "#fff",
+      borderRadius: "12px",
+      boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
+      padding: "15px",
+      zIndex: 3000, // any number higher than the button
+      display: "flex",
+      flexDirection: "column",
+    }}
+  >
     {/* Header */}
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #ddd", paddingBottom: "10px" }}>
       <strong>{selectedStudent.name}</strong>
       <div style={{ display: "flex", gap: "10px" }}>
-        {/* Expand Button */}
-     <button
-  onClick={() => {
-    setStudentChatOpen(false);
-    navigate("/all-chat", { 
-      state: { 
-        user: { 
-          userId: selectedStudent.userId,  // ✅ Correct userId
-          name: selectedStudent.name, 
-          profileImage: selectedStudent.profileImage || "/default-profile.png" 
-        }, 
-        userType: "student" 
-      } 
-    });
-  }}
->
-
+        <button
+          onClick={() => {
+            setStudentChatOpen(false);
+            navigate("/all-chat", {
+              state: {
+                user: {
+                  userId: selectedStudent.userId,
+                  name: selectedStudent.name,
+                  profileImage: selectedStudent.profileImage || "/default-profile.png",
+                },
+                userType: "student",
+              },
+            });
+          }}
+          style={{background:"none", border:"none", cursor:"pointer"}}
+        >
           <img width="30" height="30" src="https://img.icons8.com/ios-glyphs/30/expand--v1.png" alt="expand" />
         </button>
-
-        <button onClick={() => setStudentChatOpen(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}>×</button>
+        <button onClick={() => setStudentChatOpen(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}>
+          ×
+        </button>
       </div>
     </div>
 
@@ -1890,16 +1732,20 @@ useEffect(() => {
       ) : (
         popupMessages.map((msg) => (
           <div key={msg.id} style={{ marginBottom: "10px", textAlign: msg.senderId === admin.userId ? "right" : "left" }}>
-            <span style={{
-              background: msg.senderId === admin.userId ? "#4b6cb7" : "#eee",
-              color: msg.senderId === admin.userId ? "#fff" : "#000",
-              padding: "6px 12px",
-              borderRadius: "12px",
-              display: "inline-block",
-              maxWidth: "80%"
-            }}>
+            <span
+              style={{
+                background: msg.senderId === admin.userId ? "#4b6cb7" : "#eee",
+                color: msg.senderId === admin.userId ? "#fff" : "#000",
+                padding: "6px 12px",
+                borderRadius: "12px",
+                display: "inline-block",
+                maxWidth: "80%",
+              }}
+            >
               {msg.text}
-              {msg.edited && <span style={{ fontSize: "10px", opacity: 0.7 }}> (edited)</span>}
+              {msg.edited && (
+                <span style={{ fontSize: "10px", opacity: 0.7 }}> (edited)</span>
+              )}
             </span>
           </div>
         ))
@@ -1908,22 +1754,23 @@ useEffect(() => {
 
     {/* Input */}
     <div style={{ display: "flex", marginTop: "8px", gap: "5px" }}>
-      <input
-        type="text"
-        value={popupInput}
-        onChange={e => setPopupInput(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && sendPopupMessage()}
-        placeholder="Type a message..."
-        style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }}
-      />
-      <button onClick={() => sendPopupMessage()} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>➤</button>
+      <input type="text" value={popupInput} onChange={(e) => setPopupInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendPopupMessage()} placeholder="Type a message..." style={{ flex: 1, padding: "8px 12px", borderRadius: "8px", border: "1px solid #ddd" }} />
+      <button onClick={() => sendPopupMessage()} style={{ background: "none", border: "none", color: "#3654dada", cursor: "pointer", fontSize: "30px" }}>
+        ➤
+      </button>
     </div>
   </div>
 )}
 
-      </div>
-    </div>
-  );
-}
 
+          </aside>
+        </>
+
+
+
+      )}
+    </div>
+
+  </div>
+)}
 export default StudentsPage;

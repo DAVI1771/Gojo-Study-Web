@@ -49,65 +49,111 @@ def upload_file_to_firebase(file, folder=""):
 
 
 
-
-# ---------------- REGISTER ADMIN ---------------- #
 @app.route("/api/register", methods=["POST"])
 def register_admin():
+    from datetime import datetime
+
+    data = request.form
+    name = data.get("name")
+    password = data.get("password")
+    email = data.get("email")
+    gender = data.get("gender")
+    phone = data.get("phone")
+    title = data.get("title")
+    profile = request.files.get("profile")
+
+    users_ref = db.reference("Users")
+    admins_ref = db.reference("School_Admins")
+    counters_ref = db.reference("counters/school_admins")
+
+    # Check required fields (username removed, will be generated)
+    if not name or not password or not email:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    # Email duplicate check
+    users = users_ref.get() or {}
+    for u in users.values():
+        if u.get("email") == email:
+            return jsonify({"success": False, "message": "Email already in use!"}), 400
+
+    # ==== Atomic adminId generation: GEM_<####>_<YY>
     try:
-        data = request.form
-        username = data.get("username")
-        name = data.get("name")
-        password = data.get("password")
-        email = data.get("email")
-        gender = data.get("gender")
-        phone = data.get("phone")
-        title = data.get("title")
-        profile = request.files.get("profile")
+        # Defensive: scan max existing value
+        existing_admins = admins_ref.get() or {}
+        max_found = 0
+        for a in existing_admins.values():
+            aid = a.get("adminId") or ""
+            if aid.startswith("GEM_"):
+                parts = aid.split('_')
+                if len(parts) == 3:
+                    try:
+                        seq = int(parts[1].lstrip("0") or "0")
+                        if seq > max_found:
+                            max_found = seq
+                    except Exception:
+                        continue
 
-        # Basic required checks (adjust as needed)
-        if not username or not name or not password or not email:
-            return jsonify({"success": False, "message": "Missing required fields (username, name, password, email)"}), 400
+        # Counter bump up
+        curr_counter = counters_ref.get() or 0
+        if curr_counter < max_found:
+            counters_ref.set(max_found)
 
-        # Check if username exists
-        all_users = users_ref.get() or {}
-        for u in all_users.values():
-            if u.get("username") == username:
-                return jsonify({"success": False, "message": "Username already taken!"})
+        def tx_inc(val): return (val or 0) + 1
+        new_seq = counters_ref.transaction(tx_inc)
+        if not isinstance(new_seq, int): new_seq = int(new_seq)
+        year = datetime.utcnow().year
+        year_suf = str(year)[-2:]
+        num_padded = str(new_seq).zfill(4)
+        admin_id = f"GEM_{num_padded}_{year_suf}"
 
-        # Optionally check for existing email
-        for u in all_users.values():
-            if u.get("email") == email:
-                return jsonify({"success": False, "message": "Email already in use!"})
+        # Unlikely collision: increment until unique
+        attempts = 0
+        while admins_ref.child(admin_id).get():
+            new_seq += 1
+            num_padded = str(new_seq).zfill(4)
+            admin_id = f"GEM_{num_padded}_{year_suf}"
+            attempts += 1
+            if attempts > 1000:
+                admin_id = f"GEM_{str(int(datetime.utcnow().timestamp()))[-6:]}_{year_suf}"
+                break
+    except Exception:
+        admin_id = f"GEM_{str(int(datetime.utcnow().timestamp()))[-6:]}_{year_suf}"
 
-        profile_url = upload_file_to_firebase(profile, folder="profiles") if profile else ""
+    # Profile image if present
+    profile_url = ""
+    if profile:
+        filename = f"profiles/{profile.filename}"
+        blob = bucket.blob(filename)
+        blob.upload_from_file(profile, content_type=profile.content_type)
+        blob.make_public()
+        profile_url = blob.public_url
 
-        # Create new user
-        new_user = users_ref.push()
-        new_user.set({
-            "userId": new_user.key,
-            "name": name,
-            "username": username,
-            "password": password,  # Consider hashing passwords before storing
-            "email": email,
-            "gender": gender,
-            "phone": phone,
-            "profileImage": profile_url,
-            "role": "School_Admins",
-            "isActive": True
-        })
+    # ==== Create user (username = adminId by default)
+    new_user = users_ref.push()
+    user_data = {
+        "userId": new_user.key,
+        "name": name,
+        "username": admin_id,  # <-- username is always adminId
+        "password": password,
+        "email": email,
+        "gender": gender,
+        "phone": phone,
+        "profileImage": profile_url,
+        "role": "School_Admins",
+        "isActive": True,
+    }
+    new_user.set(user_data)
 
-        # Create admin record
-        new_admin = school_admin_ref.push()
-        new_admin.set({
-            "adminId": new_admin.key,
-            "userId": new_user.key,
-           
-            "title": title,
-        })
+    # ==== Create School_Admins/<adminId>
+    admin_data = {
+        "adminId": admin_id,
+        "userId": new_user.key,
+        "status": "active",
+        "title": title,
+    }
+    admins_ref.child(admin_id).set(admin_data)
 
-        return jsonify({"success": True, "message": "Registration successful!"})
-    except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+    return jsonify({"success": True, "message": "Registration successful!", "adminId": admin_id})
 
 # ---------------- LOGIN ADMIN ---------------- #
 @app.route("/api/login", methods=["POST"])

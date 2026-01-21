@@ -33,7 +33,7 @@ function TeachersPage() {
   const [unreadSenders, setUnreadSenders] = useState([]); 
   const [postNotifications, setPostNotifications] = useState([]);
 const [showPostDropdown, setShowPostDropdown] = useState(false);
-
+const [selectedTeacherUser, setSelectedTeacherUser] = useState(null);
   const navigate = useNavigate();
  const admin = JSON.parse(localStorage.getItem("admin")) || {};
 const adminUserId = admin.userId;   // ✅ now it exists
@@ -106,6 +106,24 @@ const fetchPostNotifications = async () => {
   }
 };
 
+useEffect(() => {
+  if (!selectedTeacher?.userId) {
+    setSelectedTeacherUser(null);
+    return;
+  }
+
+  async function fetchUser() {
+    try {
+      const res = await axios.get(
+        `https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users/${selectedTeacher.userId}.json`
+      );
+      setSelectedTeacherUser(res.data || {});
+    } catch (err) {
+      setSelectedTeacherUser(null);
+    }
+  }
+  fetchUser();
+}, [selectedTeacher]);
 
 useEffect(() => {
   if (!adminId) return;
@@ -712,10 +730,7 @@ useEffect(() => {
       {/* ---------------- TOP NAVBAR ---------------- */}
       <nav className="top-navbar">
   <h2>Gojo Dashboard</h2>
-  <div className="nav-search">
-    <FaSearch className="search-icon" />
-    <input type="text" placeholder="Search Teacher and Student..." />
-  </div>
+
   <div className="nav-right">
     <div
   className="icon-circle"
@@ -965,7 +980,7 @@ useEffect(() => {
         </div>
 
         {/* ---------------- MAIN CONTENT ---------------- */}
-        <div className="main-content" style={{ padding: "30px", width: "65%", marginLeft: "200px" }}>
+        <div className="main-content" style={{ padding: "30px", width: "55%", marginLeft: "300px" }}>
           <h2 style={{ marginBottom: "10px", textAlign: "center" }}>Teachers</h2>
 
           {/* Grade Filter */}
@@ -1000,7 +1015,7 @@ useEffect(() => {
                   key={t.teacherId}
                   onClick={() => setSelectedTeacher(t)}
                   style={{
-                    width: "700px",
+                    width: "500px",
                     height: "100px",
                     border: "1px solid #ddd",
                     borderRadius: "12px",
@@ -1053,7 +1068,7 @@ useEffect(() => {
         </div>
 
         {/* ---------------- RIGHT SIDEBAR ---------------- */}
-        {selectedTeacher && (
+      {selectedTeacher && (
   <div
     className="teacher-info-sidebar"
     style={{
@@ -1065,11 +1080,30 @@ useEffect(() => {
       background: "#ffffff",
       boxShadow: "0 0 18px rgba(0,0,0,0.08)",
       borderLeft: "1px solid #e5e7eb",
-      zIndex: 20,
+      zIndex: 120,
       display: "flex",
       flexDirection: "column"
     }}
   >
+    {/* CLOSE BUTTON at the top right */}
+    <div style={{ position: "absolute", top: 15, right: 22, zIndex: 999 }}>
+      <button
+        onClick={() => setSelectedTeacher(null)}
+        aria-label="Close sidebar"
+        style={{
+          background: "none",
+          border: "none",
+          fontSize: 28,
+          fontWeight: 700,
+          color: "#3647b7",
+          cursor: "pointer",
+          padding: 2,
+          lineHeight: 1,
+        }}
+      >
+        ×
+      </button>
+    </div>
     {/* ================= SCROLLABLE CONTENT ================= */}
     <div
       style={{
@@ -1149,158 +1183,92 @@ useEffect(() => {
      
 {/* ================= DETAILS TAB ================= */}
 
-
 {activeTab === "details" && selectedTeacher && (
-  <div style={{
-    background: "linear-gradient(145deg, #f0f4ff, #ffffff)",
-    padding: "30px",
-    borderRadius: "24px",
-    boxShadow: "0 20px 40px rgba(0,0,0,0.1)",
-    maxWidth: "900px",
-    margin: "20px auto",
-    fontFamily: "Poppins, sans-serif",
-    transition: "0.4s",
-  }}>
-
-    {/* Header */}
-    <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 30 }}>
-    
-      <div>
-        <h2 style={{ margin: 0, color: "#1e40af", fontSize: 28 }}>{selectedTeacher.name}</h2>
-        <p style={{ margin: 4, color: "#6b7280", fontSize: 14 }}>Teacher ID: <span style={{ fontWeight: 600 }}>{selectedTeacher.teacherId}</span></p>
-      </div>
+  <div
+    style={{
+      padding: "30px 18px",
+      background: "linear-gradient(180deg,#eef2ff 75%,#f8fafc 100%)",
+      borderRadius: 24,
+      boxShadow: "0 10px 30px rgba(75,108,183,0.08)",
+      fontFamily: "Inter, system-ui,sans-serif",
+      margin: "0 auto",
+      maxWidth: 450
+    }}
+  >
+    <h3 style={{
+      margin: 0, marginBottom: 10, color: "#1e40af", fontWeight: 900, letterSpacing: ".2px", fontSize: 22, textAlign: "center"
+    }}>
+      👩‍🏫 Teacher Profile
+    </h3>
+    <div style={{ color: "#64748b", fontSize: 13, textAlign: "center", marginBottom: 22 }}>
+      ID: <b style={{ color: "#4b6cb7" }}>{selectedTeacher.teacherId}</b>
     </div>
 
-    {/* Summary Cards */}
-    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 25 }}>
-      <div style={{
-        flex: "1 1 150px",
-        background: "#e0f2fe",
-        padding: "16px",
-        borderRadius: "16px",
-        textAlign: "center",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-        cursor: "default",
-      }}>
-        <h3 style={{ margin: 0, color: "#1e3a8a" }}>{selectedTeacher.gradesSubjects?.length || 0}</h3>
-        <p style={{ margin: 0, color: "#2563eb" }}>Courses Assigned</p>
-      </div>
-
-      <div style={{
-        flex: "1 1 150px",
-        background: "#fde68a",
-        padding: "16px",
-        borderRadius: "16px",
-        textAlign: "center",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-        cursor: "default",
-      }}>
-        <h3 style={{ margin: 0, color: "#b45309" }}>
-          {selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + 1, 0)}
-        </h3>
-        <p style={{ margin: 0, color: "#f59e0b" }}>Subjects</p>
-      </div>
-
-      {/* Busy Periods Icon */}
-      <div style={{
-        flex: "1 1 150px",
-        background: "#fef3c7",
-        padding: "16px",
-        borderRadius: "16px",
-        textAlign: "center",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-        position: "relative",
-      }}>
-        <div style={{
-          width: 40,
-          height: 40,
-          margin: "0 auto 8px",
-          borderRadius: "50%",
-          background: "#fbbf24",
-          animation: "pulse 1.5s infinite",
-        }}></div>
-        <p style={{ margin: 0, fontWeight: 600, color: "#b45309" }}>Busy Periods</p>
-        <p style={{ margin: 0, color: "#92400e", fontSize: 14 }}>
-          {selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0)} / 8
-        </p>
-      </div>
-    </div>
-
-    {/* Courses List */}
-    <div>
-      <h4 style={{ color: "#4b6cb7", marginBottom: 16 }}>Assigned Courses</h4>
-      {selectedTeacher.gradesSubjects?.length > 0 ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: 12 }}>
-          {selectedTeacher.gradesSubjects.map((gs, i) => {
-            const colors = [
-              ["#e0f2fe", "#bae6fd"],
-              ["#d1fae5", "#a7f3d0"],
-              ["#fef3c7", "#fde68a"],
-              ["#fee2e2", "#fecaca"],
-              ["#ede9fe", "#ddd6fe"]
-            ];
-            const color = colors[i % colors.length];
-            const totalPeriods = gs.periods || Math.floor(Math.random() * 5) + 1;
-            const availability = gs.availability || Math.floor(Math.random() * 100);
-
-            return (
-              <div key={i} style={{
-                background: `linear-gradient(135deg, ${color[0]}, ${color[1]})`,
-                padding: "14px",
-                borderRadius: "16px",
-                boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-                cursor: "pointer",
-                position: "relative",
-                overflow: "hidden"
-              }}>
-                <p style={{ margin: 0, fontWeight: 600, color: "#1e3a8a" }}>{gs.subject}</p>
-                <small style={{ color: "#374151" }}>Grade {gs.grade} • Section {gs.section}</small>
-              </div>
-            );
-          })}
+    {/* Info GRID */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 18,
+        marginBottom: 16,
+      }}
+    >
+      {[
+        { label: "Email", icon: "📧", value: selectedTeacher.email },
+        { label: "Gender", icon: selectedTeacher.gender === "male" ? "♂️" : selectedTeacher.gender === "female" ? "♀️" : "⚧", value: selectedTeacher.gender || "N/A" },
+        { label: "Phone", icon: "📱", value: selectedTeacher.phone || selectedTeacher.phoneNumber },
+        { label: "Status", icon: "✅", value: selectedTeacher.status || "Active" },
+        { label: "Subject(s)", icon: "📚", value: selectedTeacher.gradesSubjects?.map(gs => gs.subject).filter(Boolean).join(", ") },
+        { label: "Teacher ID", icon: "🆔", value: selectedTeacher.teacherId },
+      ].map((item, i) => (
+        <div
+          key={i}
+          style={{
+            alignItems: "center",
+            justifyContent: "flex-start",
+            display: "flex",
+            background: "#fff",
+            padding: "14px",
+            borderRadius: 14,
+            boxShadow: "0 2px 12px rgba(75,108,183,0.04)",
+            minHeight: 50,
+          }}
+        >
+          <span style={{
+            fontSize: 24,
+            marginRight: 14,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#4b6cb7"
+          }}>{item.icon}</span>
+          <div>
+            <div style={{
+              fontSize: "12px",
+              fontWeight: 700,
+              letterSpacing: ".6px",
+              color: "#64748b",
+              textTransform: "uppercase"
+            }}>
+              {item.label}
+            </div>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: item.label === "Status"
+                ? (item.value && String(item.value).toLowerCase() === "active" ? "#16a34a" : "#991b1b")
+                : "#111",
+              marginTop: 2,
+              wordBreak: "break-word"
+            }}>
+              {item.value || <span style={{ color: "#d1d5db" }}>N/A</span>}
+            </div>
+          </div>
         </div>
-      ) : (
-        <p style={{ color: "#9ca3af", fontStyle: "italic" }}>No assigned courses yet</p>
-      )}
+      ))}
     </div>
-
-    {/* Pie Chart: Busy vs Free Periods */}
-    <div style={{ marginTop: 40, background: "#fefefe", padding: 20, borderRadius: 16, boxShadow: "0 10px 25px rgba(0,0,0,0.08)" }}>
-      <h4 style={{ color: "#4b6cb7", marginBottom: 12 }}>Workload Overview</h4>
-      <ResponsiveContainer width="100%" height={200}>
-        <PieChart>
-          <Pie
-            data={[
-              { name: "Busy", value: selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0) || 0 },
-              { name: "Free", value: 8 - (selectedTeacher.gradesSubjects?.reduce((acc, gs) => acc + (gs.periods || 1), 0) || 0) }
-            ]}
-            dataKey="value"
-            nameKey="name"
-            cx="50%"
-            cy="50%"
-            outerRadius={70}
-            innerRadius={40}
-            paddingAngle={4}
-          >
-            <Cell key="busy" fill="#4b6cb7" />
-            <Cell key="free" fill="#dbeafe" />
-          </Pie>
-          <Tooltip />
-        </PieChart>
-      </ResponsiveContainer>
-      <p style={{ textAlign: "center", marginTop: 8, fontWeight: 600, color: "#1e3a8a" }}>Busy vs Free Periods</p>
-    </div>
-
-    <style>{`
-      @keyframes pulse {
-        0% { transform: scale(0.9); opacity: 0.7; }
-        50% { transform: scale(1.1); opacity: 1; }
-        100% { transform: scale(0.9); opacity: 0.7; }
-      }
-    `}</style>
   </div>
 )}
-
 
       
 {/* ================= SCHEDULE TAB ================= */}

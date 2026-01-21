@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { FaHome, FaCog, FaSignOutAlt, FaSave, FaBell, FaSearch, FaClipboardCheck, FaUsers, FaChalkboardTeacher, FaFacebookMessenger } from "react-icons/fa";
 import "../styles/global.css";
 
+const API_BASE = "http://127.0.0.1:5000/api";
+const RTDB_BASE = "https://ethiostore-17d9f-default-rtdb.firebaseio.com";
 function AttendancePage() {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,6 +17,15 @@ function AttendancePage() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [courses, setCourses] = useState([]);
   const navigate = useNavigate();
+const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [highlightedPostId, setHighlightedPostId] = useState(null);
+// Messenger (Dashboard-like)
+  const [showMessenger, setShowMessenger] = useState(false);
+  const [conversations, setConversations] = useState([]); // conversations with unread messages for this teacher
+
+  // totalUnreadMessages helper
+  const totalUnreadMessages = conversations.reduce((sum, c) => sum + (c.unreadForMe || 0), 0);
 
   const [teacher, setTeacher] = useState(null);
   
@@ -45,6 +56,103 @@ function AttendancePage() {
       localStorage.removeItem("teacher"); // or "user", depending on your auth
       navigate("/login");
     };
+
+// ---------------- MESSENGER: same behavior as Dashboard ----------------
+  const fetchConversations = async (currentTeacher = teacher) => {
+    try {
+      const t = currentTeacher || JSON.parse(localStorage.getItem("teacher"));
+      if (!t || !t.userId) {
+        setConversations([]);
+        return;
+      }
+
+      const [chatsRes, usersRes] = await Promise.all([axios.get(`${RTDB_BASE}/Chats.json`), axios.get(`${RTDB_BASE}/Users.json`)]);
+      const chats = chatsRes.data || {};
+      const users = usersRes.data || {};
+
+      const usersByKey = users || {};
+      const userKeyByUserId = {};
+      Object.entries(usersByKey).forEach(([pushKey, u]) => {
+        if (u && u.userId) userKeyByUserId[u.userId] = pushKey;
+      });
+
+      const convs = Object.entries(chats)
+        .map(([chatId, chat]) => {
+          const unreadMap = chat.unread || {};
+          const unreadForMe = unreadMap[t.userId] || 0;
+          if (!unreadForMe) return null;
+
+          const participants = chat.participants || {};
+          const otherKeyCandidate = Object.keys(participants || {}).find((p) => p !== t.userId);
+          if (!otherKeyCandidate) return null;
+
+          let otherPushKey = otherKeyCandidate;
+          let otherRecord = usersByKey[otherPushKey];
+
+          if (!otherRecord) {
+            const mapped = userKeyByUserId[otherKeyCandidate];
+            if (mapped) {
+              otherPushKey = mapped;
+              otherRecord = usersByKey[mapped];
+            }
+          }
+
+          if (!otherRecord) {
+            otherRecord = { userId: otherKeyCandidate, name: otherKeyCandidate, profileImage: "/default-profile.png" };
+          }
+
+          const contact = {
+            pushKey: otherPushKey,
+            userId: otherRecord.userId || otherKeyCandidate,
+            name: otherRecord.name || otherRecord.username || otherKeyCandidate,
+            profileImage: otherRecord.profileImage || otherRecord.profile || "/default-profile.png",
+          };
+
+          const lastMessage = chat.lastMessage || {};
+
+          return {
+            chatId,
+            contact,
+            displayName: contact.name,
+            profile: contact.profileImage,
+            lastMessageText: lastMessage.text || "",
+            lastMessageTime: lastMessage.timeStamp || lastMessage.time || null,
+            unreadForMe,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+      setConversations(convs);
+    } catch (err) {
+      console.error("Error fetching conversations:", err);
+      setConversations([]);
+    }
+  };
+
+  const handleMessengerToggle = async () => {
+    setShowMessenger((s) => !s);
+    await fetchConversations();
+  };
+
+  const handleOpenConversation = async (conv, index) => {
+    if (!teacher || !conv) return;
+    const { chatId, contact } = conv;
+
+    // Navigate to AllChat with contact + chatId and indicate attendance tab
+    navigate("/all-chat", { state: { contact, chatId, tab: "attendance" } });
+
+    // Clear unread for this teacher in DB
+    try {
+      await axios.put(`${RTDB_BASE}/Chats/${chatId}/unread/${teacher.userId}.json`, null);
+    } catch (err) {
+      console.error("Failed to clear unread in DB:", err);
+    }
+
+    setConversations((prev) => prev.filter((_, i) => i !== index));
+    setShowMessenger(false);
+  };
+
   // ---------------- FETCH COURSES ----------------
   useEffect(() => {
     if (!teacherInfo) return;
@@ -201,6 +309,106 @@ const filteredStudents = students.filter(
 
   const grades = [...new Set(students.map(s => s.grade))].sort();
 
+
+
+  
+  // ---------------- FETCH NOTIFICATIONS (ENRICHED WITH ADMIN INFO) ----------------
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        // 1) fetch posts
+        const res = await axios.get(`${API_BASE}/get_posts`);
+        let postsData = res.data || [];
+
+        // normalize to array
+        if (!Array.isArray(postsData) && typeof postsData === "object") {
+          postsData = Object.values(postsData);
+        }
+
+        // 2) fetch School_Admins and Users from RTDB
+        const [adminsRes, usersRes] = await Promise.all([
+          axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/School_Admins.json"),
+          axios.get("https://ethiostore-17d9f-default-rtdb.firebaseio.com/Users.json"),
+        ]);
+        const schoolAdmins = adminsRes.data || {};
+        const users = usersRes.data || {};
+
+        // build helper maps
+        const usersByKey = { ...users };
+        const usersByUserId = {};
+        Object.values(users).forEach((u) => {
+          if (u && u.userId) usersByUserId[u.userId] = u;
+        });
+
+        // Resolve helper: adminKey -> { name, profile }
+        const resolveAdminInfo = (post) => {
+          const adminId = post.adminId || post.posterAdminId || post.poster || post.admin || null;
+
+          // 1) adminId is School_Admins key
+          if (adminId && schoolAdmins[adminId]) {
+            const schoolAdminRec = schoolAdmins[adminId];
+            const userKey = schoolAdminRec.userId;
+            const userRec = usersByKey[userKey] || usersByUserId[userKey] || null;
+            const name = (userRec && userRec.name) || schoolAdminRec.name || schoolAdminRec.username || post.adminName || "Admin";
+            const profile = (userRec && (userRec.profileImage || userRec.profile)) || schoolAdminRec.profileImage || post.adminProfile || "/default-profile.png";
+            return { name, profile };
+          }
+
+          // 2) adminId might already be a Users key
+          if (adminId && usersByKey[adminId]) {
+            const userRec = usersByKey[adminId];
+            return {
+              name: userRec.name || userRec.username || post.adminName || "Admin",
+              profile: userRec.profileImage || post.adminProfile || "/default-profile.png",
+            };
+          }
+
+          // 3) adminId might be a user.userId field value
+          if (adminId && usersByUserId[adminId]) {
+            const userRec = usersByUserId[adminId];
+            return {
+              name: userRec.name || userRec.username || post.adminName || "Admin",
+              profile: userRec.profileImage || post.adminProfile || "/default-profile.png",
+            };
+          }
+
+          // 4) Fallback to any admin fields present on the post itself
+          return {
+            name: post.adminName || post.name || post.username || "Admin",
+            profile: post.adminProfile || post.profileImage || "/default-profile.png",
+          };
+        };
+
+        // build notifications (enriched)
+        const latest = postsData
+          .slice()
+          .sort((a, b) => {
+            const ta = a.time ? new Date(a.time).getTime() : a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tb = b.time ? new Date(b.time).getTime() : b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return tb - ta;
+          })
+          .slice(0, 5)
+          .map((post) => {
+            const info = resolveAdminInfo(post);
+            return {
+              id: post.postId || post.id || null,
+              title: post.message?.substring(0, 50) || "Untitled post",
+              adminName: info.name,
+              adminProfile: info.profile,
+            };
+          });
+
+        setNotifications(latest);
+      } catch (err) {
+        console.error("Error fetching notifications:", err);
+      }
+    };
+
+    fetchNotifications();
+  }, []);
+
+
+
   // ---------------- RENDER ----------------
   return (
    <div className="dashboard-page">
@@ -212,13 +420,115 @@ const filteredStudents = students.filter(
                  <input type="text" placeholder="Search Teacher and Student..." />
                </div>
                <div className="nav-right">
-                 <div className="icon-circle"><FaBell /></div>
-                 <div className="icon-circle"><FaFacebookMessenger /></div>
-                 <div className="icon-circle"><FaCog /></div>
-                 
-   
-         <img src={teacher?.profileImage || "/default-profile.png"} />
-   
+                  <div className="icon-circle">
+                                     <div
+                                       onClick={() => setShowNotifications(!showNotifications)}
+                                       style={{ cursor: "pointer", position: "relative" }}
+                                     >
+                                       <FaBell size={24} />
+                                       {notifications.length > 0 && (
+                                         <span style={{
+                                           position: "absolute",
+                                           top: -5,
+                                           right: -5,
+                                           background: "red",
+                                           color: "white",
+                                           borderRadius: "50%",
+                                           width: 18,
+                                           height: 18,
+                                           fontSize: 12,
+                                           display: "flex",
+                                           alignItems: "center",
+                                           justifyContent: "center",
+                                         }}>{notifications.length}</span>
+                                       )}
+                                     </div>
+                         
+                                     {showNotifications && (
+                                       <div style={{
+                                         position: "absolute",
+                                         top: 30,
+                                         right: 0,
+                                         width: 300,
+                                         maxHeight: 400,
+                                         overflowY: "auto",
+                                         background: "#fff",
+                                         boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+                                         borderRadius: 8,
+                                         zIndex: 100,
+                                       }}>
+                                         {notifications.length > 0 ? (
+                                           notifications.map((post, index) => (
+                                             <div
+                                               key={post.id || index}
+                                               onClick={() => {
+                                                 navigate("/dashboard");
+                                                 setTimeout(() => {
+                                                   const postElement = postRefs.current[post.id];
+                                                   if (postElement) {
+                                                     postElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                                                     setHighlightedPostId(post.id);
+                                                     setTimeout(() => setHighlightedPostId(null), 3000);
+                                                   }
+                                                 }, 150);
+                                                 // remove after click
+                                                 setNotifications(prev => prev.filter((_, i) => i !== index));
+                                                 setShowNotifications(false);
+                                               }}
+                                               style={{
+                                                 display: "flex",
+                                                 alignItems: "center",
+                                                 padding: "10px 15px",
+                                                 borderBottom: "1px solid #eee",
+                                                 cursor: "pointer",
+                                               }}
+                                             >
+                                               <img src={post.adminProfile} alt={post.adminName} style={{ width: 35, height: 35, borderRadius: "50%", marginRight: 10 }} />
+                                               <div>
+                                                 <strong>{post.adminName}</strong>
+                                                 <p style={{ margin: 0, fontSize: 12 }}>{post.title}</p>
+                                               </div>
+                                             </div>
+                                           ))
+                                         ) : (
+                                           <div style={{ padding: 15 }}>No notifications</div>
+                                         )}
+                                       </div>
+                                     )}
+                                   </div>
+                {/* Messenger */}
+          <div className="icon-circle" style={{ position: "relative", marginLeft: 12 }}>
+            <div onClick={handleMessengerToggle} style={{ cursor: "pointer", position: "relative" }}>
+              <FaFacebookMessenger size={22} />
+              {totalUnreadMessages > 0 && (
+                <span style={{ position: "absolute", top: -6, right: -6, background: "#0b78f6", color: "#fff", borderRadius: "50%", minWidth: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 6px", fontSize: 12 }}>
+                  {totalUnreadMessages}
+                </span>
+              )}
+            </div>
+
+            {showMessenger && (
+              <div style={{ position: "absolute", top: 34, right: 0, width: 340, maxHeight: 420, overflowY: "auto", background: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", borderRadius: 8, zIndex: 200, padding: 8 }}>
+                {conversations.length === 0 ? (
+                  <div style={{ padding: 14 }}>No unread messages</div>
+                ) : conversations.map((conv, idx) => (
+                  <div key={conv.chatId || idx} onClick={() => handleOpenConversation(conv, idx)} style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, borderBottom: "1px solid #eee", cursor: "pointer" }}>
+                    <img src={conv.profile || "/default-profile.png"} alt={conv.displayName} style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover" }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong>{conv.displayName}</strong>
+                        {conv.unreadForMe > 0 && <span style={{ background: "#0b78f6", color: "#fff", padding: '2px 8px', borderRadius: 999, fontSize: 12 }}>{conv.unreadForMe}</span>}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#444", marginTop: 4 }}>{conv.lastMessageText || "No messages yet"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+                 <div className="icon-circle" onClick={() => navigate("/settings")}><FaCog /></div>
+                 <img src={teacher?.profileImage || "/default-profile.png"} />
+
                </div>
              </nav>
        
@@ -266,9 +576,7 @@ const filteredStudents = students.filter(
                    <Link className="sidebar-btn" to="/schedule" >
                                                     <FaUsers /> Schedule
                                                   </Link>
-                   <Link className="sidebar-btn" to="/settings">
-                     <FaCog /> Settings
-                   </Link>
+                  
                    <button className="sidebar-btn logout-btn" onClick={handleLogout}>
                      <FaSignOutAlt /> Logout
                    </button>

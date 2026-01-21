@@ -863,10 +863,7 @@ const cancelEdit = () => setEditTarget(null);
 {/* TOP NAVBAR */}
 <div className="top-navbar">
   <h2>Gojo Dashboard</h2>
-  <div className="nav-search">
-    <input type="text" placeholder="Search..." />
-    <FaSearch className="search-icon" />
-  </div>
+  
   <div className="nav-right">
            <div
   className="icon-circle"
